@@ -1,0 +1,240 @@
+#!/bin/bash
+
+EXEPATH="$(dirname "$(realpath "$0")" )"
+PATH="$EXEPATH:$PATH"
+
+printhelp() {
+  echo "Usage: $0 [OPTIONS] <source> <output prefix>"
+  echo "  Performs projection formation in accordance with shift-in-scan approach."
+  echo "OPTIONS:"
+  echo "  -b PATH      Background image in original position."
+  echo "  -B PATH      Background image in shifted position."
+  echo "  -d PATH      Dark field image in original position."
+  echo "  -D PATH      Dark field image in shifted position."
+  echo "  -m PATH      Image containing map of gaps."
+  echo "  -f INT       First frame in original data set."
+  echo "  -F INT       First frame in shifted data set."
+  echo "  -e INT       Number of projections to process."
+  echo "  -z INT       Binning over multiple input prrojections."
+  echo "  -Z INT[,INT] Binn factor(s)."
+  echo "  -c SEG,SEG   Crop image."
+  echo "  -r FLOAT     Rotate projections."
+  echo "  -I str       Type of gap fill algorithm: NO(default), NS, AT, AM"
+  echo "  -t INT       Test mode: keeps intermediate images for the given projection."
+  echo "  -v           Be verbose to show progress."
+  echo "  -h           Prints this help."
+}
+
+chkf () {
+  if [ ! -e "$1" ] ; then
+    echo "ERROR! Non existing $2 path: \"$1\"" >&2
+    exit 1
+  fi
+}
+
+wrong_num() {
+  opttxt=""
+  if [ -n "$3" ] ; then
+    opttxt="given by option $3"
+  fi
+  echo "String \"$1\" $opttxt $2." >&2
+  printhelp >&2
+  exit 1
+}
+
+chknum () {
+  if ! (( $( echo " $1 == $1 " | bc -l 2>/dev/null ) )) ; then
+    wrong_num "$1" "is not a number" "$2"
+  fi
+}
+
+chkint () {
+  if ! [ "$1" -eq "$1" ] 2>/dev/null ; then
+    wrong_num "$1" "is not an integer" "$2"
+  fi
+}
+
+chkpos () {
+  if (( $(echo "0 >= $1" | bc -l) )); then
+    wrong_num "$1" "is not strictly positive" "$2"
+  fi
+}
+
+chkNneg () {
+  if (( $(echo "0 > $1" | bc -l) )); then
+    wrong_num "$1" "is negative" "$2"
+  fi
+}
+
+
+chkhdf () {
+  if ((  1 != $(tr -dc ':'  <<< "$1" | wc -c)  )) ; then
+    echo "Input ($1) must be of form 'hdfFile:hdfContainer'." >&2
+    exit 1
+  fi
+}
+
+
+bgO=""
+bgS=""
+dfO=""
+dfS=""
+gmask=""
+cropStr=""
+firstO=0
+firstS=""
+end=""
+rotate=0
+fill=""
+testme=""
+beverbose=false
+allargs=""
+binn=""
+zinn=""
+while getopts "b:B:d:D:m:f:F:e:c:r:z:Z:i:t:hv" opt ; do
+  allargs=" $allargs -$opt $OPTARG"
+  case $opt in
+    b)  bgO=$OPTARG;;
+    B)  bgS=$OPTARG;;
+    d)  dfO=$OPTARG;;
+    D)  dfS=$OPTARG;;
+    m)  gmask=$OPTARG;;
+    f)  firstO=$OPTARG
+        chkint "$firstO" "-$opt"
+        chkNneg "$firstO" "-$opt"
+        ;;
+    F)  firstS=$OPTARG
+        chkint "$firstS" "-$opt"
+        chkNneg "$firstS" "-$opt"
+        ;;
+    e)  end=$OPTARG
+        chkint "$end" "-$opt"
+        chkpos "$end" "-$opt"
+        ;;
+    c)  cropStr=$OPTARG
+        ;;
+    r)  rotate=$OPTARG
+        chknum "$rotate" "-$opt"
+        ;;
+    z)  zinn=$OPTARG
+        chkint "$zinn" "-$opt"
+        #chkpos "$zinn" "-$opt"
+        ;;
+    Z)  binn=$OPTARG;;
+    i)  fill="$OPTARG";;
+    t)  testme="$OPTARG";;
+    v)  beverbose=true;;
+    h)  printhelp ; exit 1 ;;
+    \?) echo "ERROR! Invalid option: -$OPTARG" >&2 ; exit 1 ;;
+    :)  echo "ERROR! Option -$OPTARG requires an argument." >&2 ; exit 1 ;;
+  esac
+done
+shift $((OPTIND-1))
+
+
+if [ -z "${1}" ] ; then
+  echo "No input path was given." >&2
+  printhelp >&2
+  exit 1
+fi
+chkhdf "$1"
+if [ -z "${2}" ] ; then
+  echo "No output prefix was given." >&2
+  printhelp >&2
+  exit 1
+fi
+if [ -z "$firstS" ] ; then
+  echo "No first frame in shifted data was given (-F)." >&2
+  printhelp >&2
+  exit 1
+fi
+if [ -z "$end" ] ; then
+  echo "No number of frames to process was given (-e)." >&2
+  printhelp >&2
+  exit 1
+fi
+
+args=" "
+if [ -n "$gmask" ] ; then
+  args="$args -M $gmask "
+fi
+if [ -n "$testme" ] ; then
+  args="$args -t $testme "
+fi
+if [ -n "$cropStr" ]  ; then
+  args="$args -c $cropStr "
+fi
+if [ "$rotate" !=  "0" ]  ; then
+  args="$args -r $rotate "
+fi
+if [ -n "$binn" ] ; then
+  args="$args -b $binn "
+fi
+if [ -n "$zinn" ] ; then
+  args="$args -z $zinn "
+fi
+if [ -n "$fill" ] ; then
+  args="$args -I $fill "
+fi
+if $beverbose ; then
+  args="$args -v"
+fi
+
+
+execMe() {
+  if $beverbose ; then
+    echo "Executing:"
+    echo "  $1"
+  fi
+  eval $1
+}
+
+
+# original position
+org_args=" $args -o ${2}_org.hdf:/data ${1}:${firstO}-$(( firstO + end )) "
+if [ -n "$bgO" ] ; then
+  org_args="$org_args -B $bgO "
+fi
+if [ -n "$dfO" ] ; then
+  org_args="$org_args -D $dfO "
+fi
+execMe "ctas proj $org_args"
+
+# shifted position
+sft_args=" $args -o ${2}_sft.hdf:/data ${1}:${firstS}-$(( firstS + end )) "
+if [ -n "$bgS" ] ; then
+  org_args="$sft_args -B $bgS "
+fi
+if [ -n "$dfS" ] ; then
+  org_args="$sft_args -D $dfS "
+fi
+execMe "ctas proj $sft_args"
+
+# mask
+if [ -n "$gmask" ] ; then
+  toExec="ctas v2v -o ${2}_mask.tif -i 8 $gmask "
+  if [ -n "$cropStr" ]  ; then
+    toExec="$toExec -c ${cropStr}, "
+  fi
+  if [ "$rotate" !=  "0" ]  ; then
+    toExec="$toExec -r $rotate "
+  fi
+  if [ -n "$binn" ] ; then
+    IFS=',' read b1 b2 <<< "$binn"
+    if [ -z "$b2" ] ; then
+      b2="$b1"
+    fi
+    binnStr="${b1},${b2},1"
+    toExec="$toExec -b $binnStr "
+  fi
+  execMe "$toExec"
+fi
+
+exit $?
+
+
+
+
+
+
+
