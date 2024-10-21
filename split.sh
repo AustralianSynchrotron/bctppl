@@ -19,7 +19,7 @@ printhelp() {
   echo "  -Z INT[,INT] Binn factor(s)."
   echo "  -c SEG,SEG   Crop image."
   echo "  -r FLOAT     Rotate projections."
-  echo "  -I str       Type of gap fill algorithm: NO(default), NS, AT, AM"
+  echo "  -i str       Type of gap fill algorithm: NO(default), NS, AT, AM"
   echo "  -t INT       Test mode: keeps intermediate images for the given projection."
   echo "  -v           Be verbose to show progress."
   echo "  -h           Prints this help."
@@ -203,10 +203,10 @@ execMe "ctas proj $org_args"
 # shifted position
 sft_args=" $args -o ${2}_sft.hdf:/data ${1}:${firstS}-$(( firstS + end )) "
 if [ -n "$bgS" ] ; then
-  org_args="$sft_args -B $bgS "
+  sft_args="$sft_args -B $bgS "
 fi
 if [ -n "$dfS" ] ; then
-  org_args="$sft_args -D $dfS "
+  sft_args="$sft_args -D $dfS "
 fi
 execMe "ctas proj $sft_args"
 
