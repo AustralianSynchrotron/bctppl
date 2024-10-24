@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0045 NEW)
 
-project(tracker)
+project(bctppl-tools)
 set(VERSION 0.7.0)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -54,22 +54,18 @@ find_library(POPTL poptmx)
 find_path(POPTH poptmx.h REQUIRED)
 include_directories(${POPTH})
 
-find_library(CTASCL common flatfield PATH_SUFFIXES ctas REQUIRED)
-find_library(CTASFL flatfield PATH_SUFFIXES ctas REQUIRED)
+find_library(CTASCL common PATH_SUFFIXES ctas REQUIRED)
 find_path(CTASH ctas/common.world.h REQUIRED)
 include_directories(${CTASH})
 
-add_executable(track track.cpp)
-target_link_libraries(track
+add_executable(align align.cpp)
+target_link_libraries(align
   poptmx
   ${CTASCL}
-  ${CTASFL}
-  ${OpenCV_LIBS}
 )
 
 
-
-install(TARGETS track RUNTIME DESTINATION bin)
+install(TARGETS align RUNTIME DESTINATION bin)
 
 
 
