@@ -9,7 +9,9 @@ struct clargs {
   Path command;               ///< Command name as it was invoked.
   deque<ImagePath> images;        ///< images to align
   Path shifts;
-  Path outmask;
+  Path outimages;
+  Path mask;
+  PointI<2> maxShifts;
   bool beverbose;
     /// \CLARGSF
   clargs(int argc, char *argv[]);
@@ -17,7 +19,8 @@ struct clargs {
 
 
 clargs::clargs(int argc, char *argv[])
-  : beverbose(false)
+  : maxShifts(0,0)
+  , beverbose(false)
 {
   poptmx::OptionTable table
   ("Aligns stack of images.",
@@ -30,11 +33,14 @@ clargs::clargs(int argc, char *argv[])
          "    file:dataset[:[slice dimension][slice(s)]]\n" + DimSliceOptionDesc)
 
     .add(poptmx::NOTE, "OPTIONS:")
-    .add(poptmx::OPTION, &outmask, 'o', "output", "Output result mask or filename.",
-           "Output filename if output is a single file. Output mask otherwise. " + MaskDesc, outmask)
+    .add(poptmx::OPTION, &outimages, 'o', "output", "Output result prefix or filename.",
+           "Output filename if output is a single file. Output mask otherwise. " + MaskDesc, outimages)
     .add(poptmx::OPTION, &shifts, 's', "shifts", "Text file with shifts.",
          "Shifts are two columns of numbers representinf X and Y shifts for each slice in input stack."
          " Must contain at least same number of shifts as input slices.")
+    .add(poptmx::OPTION, &maxShifts, 'S', "maxShifts", "Maximum shifts.", "" )
+    .add(poptmx::OPTION, &mask, 'm', "mask", "Mask of the original input volume.",
+         "If provided, corresponding combined mask will be created.")
     .add_standard_options(&beverbose);
 
   if ( ! table.parse(argc,argv) )
@@ -51,45 +57,13 @@ clargs::clargs(int argc, char *argv[])
   if ( ! table.count(&shifts) )
     exit_on_error(command, string () +
                   "Missing required argument: "+table.desc(&shifts)+".");
-  if ( ! table.count(&outmask) )
+  if ( ! table.count(&outimages) )
     exit_on_error(command, string () +
-                  "Missing required argument: "+table.desc(&outmask)+".");
+                  "Missing required argument: "+table.desc(&outimages)+".");
 
 }
 
 
-
-class ProcInThread : public InThread {
-
-  bool inThread(long int idx) {
-    if (idx >= reader.slices())
-      return false;
-
-    bar.update();
-    return true;
-  }
-
-  ReadVolumeBySlice & reader;
-  SaveVolumeBySlice & writer;
-  blitz::Array<int,2> & iShfts;
-  Crop<2> & crp;
-
-public:
-
-  ProcInThread(ReadVolumeBySlice & reader, SaveVolumeBySlice & writer,
-               blitz::Array<int,2> & iShfts, Crop<2> & crp, bool beverbose)
-    : InThread(beverbose, "Tracking pattern", reader.slices())
-    , reader(reader)
-    , writer(writer)
-    , iShfts(iShfts)
-    , crp(crp)
-  {}
-
-
-};
-
-
-\
 
 int bz_lround(double x) {return lround(x);}
 BZ_DECLARE_FUNCTION_RET(bz_lround, int);
@@ -111,13 +85,19 @@ int main(int argc, char *argv[]) { {
   blitz::Array<int,2> iShifts(-bz_lround(shifts));
   blitz::Array<int,1> xShifts = iShifts(all,0);
   xShifts -= min(xShifts);
-  const int xWid = max(xShifts);
+  const int xWid = max( abs(args.maxShifts(0)),  long(max(xShifts)) );
   blitz::Array<int,1> yShifts = iShifts(all,1);
   yShifts -= min(yShifts);
-  const int yWid = max(yShifts);
+  const int yWid = max( abs(args.maxShifts(1)),  long(max(yShifts)) );
   const Crop<2> crp( Segment(yWid, ish(0)-yWid), Segment(xWid, ish(1)-xWid) );
   const Shape<2> osh( ish(0)-2*yWid , ish(1)-2*xWid );
-  SaveVolumeBySlice oVol( args.outmask, Shape<3>( nofIm, osh(0), osh(1) ) );
+  Map mask, omask;
+  if (!args.mask.empty()) {
+    ReadImage(args.mask, mask, ish);
+    omask.resize(osh);
+    omask = 1.0;
+  }
+  SaveVolumeBySlice oVol( args.outimages, Shape<3>( nofIm, osh(0), osh(1) ) );
   ProgressBar bar(args.beverbose, "Aligning", nofIm);
   InThread::execute( nofIm, [&](long int curIm){
     Map iIm(ish);
@@ -126,8 +106,17 @@ int main(int argc, char *argv[]) { {
     genMap( blitz::Range(yShifts(curIm), yShifts(curIm) + ish(0)-1),
             blitz::Range(xShifts(curIm), xShifts(curIm) + ish(1)-1) ) = iIm;
     oVol.save(curIm, crp.apply(genMap));
+    if (omask.size()) {
+      genMap( blitz::Range(yShifts(curIm), yShifts(curIm) + ish(0)-1),
+              blitz::Range(xShifts(curIm), xShifts(curIm) + ish(1)-1) ) = mask;
+      omask *= crp.apply(genMap);
+    }
     bar.update();
   } );
+  if (omask.size()) {
+    const string omaskName = args.outimages.dtitle() + "_mask.tif";
+    SaveImage(omaskName, omask);
+  }
 
 
 } exit(0); }

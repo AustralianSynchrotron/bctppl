@@ -11,7 +11,8 @@ printhelp() {
   echo "  -B PATH      Background image in shifted position."
   echo "  -d PATH      Dark field image in original position."
   echo "  -D PATH      Dark field image in shifted position."
-  echo "  -m PATH      Image containing map of gaps."
+  echo "  -m PATH      Image containing map of pixels to fill."
+  echo "  -M PATH      Image to process same as input."
   echo "  -f INT       First frame in original data set."
   echo "  -F INT       First frame in shifted data set."
   echo "  -e INT       Number of projections to process."
@@ -80,6 +81,7 @@ bgS=""
 dfO=""
 dfS=""
 gmask=""
+pmask=""
 cropStr=""
 firstO=0
 firstS=""
@@ -91,7 +93,7 @@ beverbose=false
 allargs=""
 binn=""
 zinn=""
-while getopts "b:B:d:D:m:f:F:e:c:r:z:Z:i:t:hv" opt ; do
+while getopts "b:B:d:D:m:M:f:F:e:c:r:z:Z:i:t:hv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     b)  bgO=$OPTARG;;
@@ -99,6 +101,7 @@ while getopts "b:B:d:D:m:f:F:e:c:r:z:Z:i:t:hv" opt ; do
     d)  dfO=$OPTARG;;
     D)  dfS=$OPTARG;;
     m)  gmask=$OPTARG;;
+    M)  pmask=$OPTARG;;
     f)  firstO=$OPTARG
         chkint "$firstO" "-$opt"
         chkNneg "$firstO" "-$opt"
@@ -211,8 +214,8 @@ fi
 execMe "ctas proj $sft_args"
 
 # mask
-if [ -n "$gmask" ] ; then
-  toExec="ctas v2v -o ${2}_mask.tif -i 8 $gmask "
+if [ -n "$pmask" ] ; then
+  toExec="ctas v2v -o ${2}_mask.tif -i 8 $pmask "
   if [ -n "$cropStr" ]  ; then
     toExec="$toExec -c ${cropStr}, "
   fi
