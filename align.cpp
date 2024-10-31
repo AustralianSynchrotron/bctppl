@@ -9,7 +9,7 @@ struct clargs {
   Path command;               ///< Command name as it was invoked.
   deque<ImagePath> images;        ///< images to align
   Path shifts;
-  Path outimages;
+  ImagePath outimages;
   Path mask;
   PointI<2> maxShifts;
   bool beverbose;
@@ -94,6 +94,7 @@ int main(int argc, char *argv[]) { {
   Map mask, omask;
   if (!args.mask.empty()) {
     ReadImage(args.mask, mask, ish);
+    mask /= max(mask);
     omask.resize(osh);
     omask = 1.0;
   }
