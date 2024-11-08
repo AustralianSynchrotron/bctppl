@@ -64,6 +64,13 @@ target_link_libraries(align
   ${CTASCL}
 )
 
+add_executable(trackit trackit.cpp)
+target_link_libraries(trackit
+  poptmx
+  ${CTASCL}
+)
+
+
 
 install(TARGETS align RUNTIME DESTINATION bin)
 

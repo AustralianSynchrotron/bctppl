@@ -19,6 +19,7 @@ import numpy as np
 import math
 from scipy.optimize import curve_fit
 import argparse
+import tqdm
 
 
 parser = argparse.ArgumentParser(description=
@@ -304,15 +305,21 @@ def trackIt() :
     maskPad = torch.zeros( (1, 1, dsh[-2] + 2*tsh[-2] - 2, dsh[-1] + 2*tsh[-1] - 2 ) )
     maskPad[..., tsh[-2]-1 : -tsh[-2]+1, tsh[-1]-1 : -tsh[-1]+1 ] = torch.from_numpy(maskImage).unsqueeze(0).unsqueeze(0)
     maskPad = maskPad.to(device)
+    kernel4mask = torch.ones_like(kernel, device=device)
+    maskCorr = fn.conv2d(maskPad, kernel4mask)
+    maskCorr = torch.where(maskCorr==0, 0, 1/maskCorr)
 
     results=torch.empty( (0,2), device=device )
     btPerIm = 4 * ( math.prod(maskPad.shape) + math.prod(maskImage.shape) )
     startIndex=0
+    pbar = tqdm.tqdm(total=nofF) if args.verbose else None
     while True :
         maxNofF = int ( 0.9 * torch.cuda.mem_get_info(device)[0] / btPerIm ) # 0.9 for contingency
         stopIndex=min(startIndex+maxNofF, nofF)
         fRange = np.s_[startIndex:stopIndex]
         nofR = stopIndex-startIndex
+        if nofR <= 0 :
+            break
         dataPad = torch.zeros( (nofR, 1, dsh[-2] + 2*tsh[-2] - 2, dsh[-1] + 2*tsh[-1] - 2 ) )
         dataPad[ ... , tsh[-2]-1 : -tsh[-2]+1, tsh[-1]-1 : -tsh[-1]+1 ] = \
             torch.from_numpy(dataN[fRange,...]).unsqueeze(1)
@@ -325,6 +332,8 @@ def trackIt() :
         results = torch.cat((results,resultsR),dim=0)
 
         startIndex = stopIndex
+        if args.verbose:
+            pbar.update(nofR)
         if stopIndex >= nofF:
             break
 
