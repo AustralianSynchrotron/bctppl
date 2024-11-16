@@ -17,9 +17,11 @@ import torch.nn as nn
 import torch.nn.functional as fn
 import numpy as np
 import math
-from scipy.optimize import curve_fit
+import gc
 import argparse
 import tqdm
+from scipy.optimize import curve_fit
+from multiprocessing import Pool
 
 
 parser = argparse.ArgumentParser(description=
@@ -148,6 +150,17 @@ def getData(inputString):
         raise Exception(f"Dimensions of the container \"{inputString}\" is not 3: {sh}.")
     return data
 
+
+if args.verbose :
+    print("Reading input ...", end="")
+
+kernelImage = loadImage(os.path.dirname(__file__) + "/ball.tif")
+kernel = torch.tensor(kernelImage, device=device).unsqueeze(0).unsqueeze(0)
+ksh = kernel.shape
+st, mn = torch.std_mean(kernel)
+kernel = ( kernel - mn ) / st
+kernelBin = torch.where(kernel>0, 0, 1).to(torch.float32).to(device)
+
 data = getData(inputString)
 dataN = np.empty(data.shape, dtype=np.float32)
 data.read_direct(dataN)
@@ -156,12 +169,18 @@ nofF = data.shape[0]
 
 maskImage = loadImage(maskString, dsh) if maskString else np.ones(dsh)
 maskImage /= maskImage.max()
+maskPad = torch.zeros( (1, 1, dsh[-2] + 2*ksh[-2] - 2, dsh[-1] + 2*ksh[-1] - 2 ) )
+maskPad[..., ksh[-2]-1 : -ksh[-2]+1, ksh[-1]-1 : -ksh[-1]+1 ] = torch.from_numpy(maskImage).unsqueeze(0).unsqueeze(0)
+maskPad = maskPad.to(device)
+maskCount = fn.conv2d(maskPad, torch.ones_like(kernel, device=device))
+maskCount = torch.where(maskCount>1, maskCount, 1)
+maskBall = fn.conv2d(maskPad, kernelBin)
+minArea = math.prod(ksh) // 56
+maskCorr = torch.where( maskBall > minArea, 1, 0).squeeze().cpu().numpy()
 
-kernelImage = loadImage(os.path.dirname(__file__) + "/ball.tif")
-kernel = torch.tensor(kernelImage, device=device).unsqueeze(0).unsqueeze(0)
-st, mn = torch.std_mean(kernel)
-kernel = ( kernel - mn ) / st
-
+if args.verbose :
+    print("Read.")
+    print("Tracking the ball.")
 
 
 def selectVisually() :
@@ -287,8 +306,57 @@ def selectVisually() :
                 return False
 
 
+def removeBorders(img, mask) :
+
+  sh = img.shape
+  # BCT ONLY: the ball is never in the upper part of the image:
+  #mask[:sh[0]//4,:] = 0
+
+  def cleaLine(ln, ms, pos) :
+    str = 0 if pos else -1
+    mul = 1 if pos else -1
+    idx = str
+    prev = ln[idx]+1
+    lnl = ln.shape[0]
+    upcounter = 0
+    while abs(idx) < lnl+abs(str)-1 :
+      if ms[idx] == 0.0 :
+        prev = ln[idx+mul]
+      elif ln[idx] > prev :
+        upcounter += 1
+        if upcounter > 1 :
+          break
+        else :
+          ms[idx] = 0
+      else :
+        upcounter = 0
+        ms[idx] = 0
+        prev = ln[idx]
+      idx += mul
+
+  for idy in range(sh[0]) :
+    ln = img[idy,...]
+    ms = mask[idy,...]
+    cleaLine(ln, ms, True)
+    cleaLine(ln, ms, False)
+  for idx in range(sh[1]) :
+    ln = img[...,idx]
+    ms = mask[...,idx]
+    cleaLine(ln, ms, True)
+    cleaLine(ln, ms, False)
+
+# I can move removeNorders to GPU and use it instead of Pool multiprocessing.
+# But on our 50-100 cores it will save max 5 minutes per dataset - not worth the efforts.
+def getPosInPool(img) :
+    global maskCorr
+    borderMask = maskCorr.copy()
+    removeBorders(img, borderMask)
+    img *= borderMask
+    return np.array(np.unravel_index(np.argmax(img), img.shape))
+
 
 def trackIt() :
+    global maskPad, maskCount
 
     def normalize(ten, msk) :
         maskSum = torch.count_nonzero(msk)
@@ -301,39 +369,36 @@ def trackIt() :
         return ten
 
     torch.no_grad()
-    tsh = kernel.shape
-    maskPad = torch.zeros( (1, 1, dsh[-2] + 2*tsh[-2] - 2, dsh[-1] + 2*tsh[-1] - 2 ) )
-    maskPad[..., tsh[-2]-1 : -tsh[-2]+1, tsh[-1]-1 : -tsh[-1]+1 ] = torch.from_numpy(maskImage).unsqueeze(0).unsqueeze(0)
-    maskPad = maskPad.to(device)
-    kernel4mask = torch.ones_like(kernel, device=device)
-    maskCorr = fn.conv2d(maskPad, kernel4mask)
-    maskCorr = torch.where(maskCorr==0, 0, 1/maskCorr)
 
-    results=torch.empty( (0,2), device=device )
+    #results=torch.empty( (0,2), device=device )
+    results = np.empty((0,2))
     btPerIm = 4 * ( math.prod(maskPad.shape) + math.prod(maskImage.shape) )
     startIndex=0
-    pbar = tqdm.tqdm(total=nofF) if args.verbose else None
+    if args.verbose :
+        pbar = tqdm.tqdm(total=nofF)
     while True :
-        maxNofF = int ( 0.9 * torch.cuda.mem_get_info(device)[0] / btPerIm ) # 0.9 for contingency
+        gc.collect()
+        torch.cuda.empty_cache()
+        maxNofF = int ( 0.5   * torch.cuda.mem_get_info(device)[0] / btPerIm ) # 0.5 for contingency
+        #maxNofF = 10
         stopIndex=min(startIndex+maxNofF, nofF)
         fRange = np.s_[startIndex:stopIndex]
         nofR = stopIndex-startIndex
-        if nofR <= 0 :
-            break
-        dataPad = torch.zeros( (nofR, 1, dsh[-2] + 2*tsh[-2] - 2, dsh[-1] + 2*tsh[-1] - 2 ) )
-        dataPad[ ... , tsh[-2]-1 : -tsh[-2]+1, tsh[-1]-1 : -tsh[-1]+1 ] = \
+        dataPad = torch.zeros( (nofR, 1, dsh[-2] + 2*ksh[-2] - 2, dsh[-1] + 2*ksh[-1] - 2 ) )
+        dataPad[ ... , ksh[-2]-1 : -ksh[-2]+1, ksh[-1]-1 : -ksh[-1]+1 ] = \
             torch.from_numpy(dataN[fRange,...]).unsqueeze(1)
         dataPad = dataPad.to(device)
         dataPad = normalize(dataPad, maskPad)
-        dataCorr = fn.conv2d(dataPad, kernel)
-        dataCorrFlat = dataCorr.view(dataCorr.shape[0],-1)
-        flatIndeces = dataCorrFlat.argmax(dim=-1)
-        resultsR = torch.stack([flatIndeces // dataCorr.shape[-1], flatIndeces % dataCorr.shape[-1]], -1)
-        results = torch.cat((results,resultsR),dim=0)
+        dataCorr = fn.conv2d(dataPad, kernel) / maskCount
+        dataNP = dataCorr.cpu().numpy()
+        dataInPool = [ dataNP[cursl,0,...] for cursl in range(nofR) ]
+        with Pool() as p:
+            resultsR = np.array(p.map(getPosInPool, dataInPool))
+            results = np.concatenate((results,resultsR),axis=0)
 
-        startIndex = stopIndex
-        if args.verbose:
+        if args.verbose :
             pbar.update(nofR)
+        startIndex = stopIndex
         if stopIndex >= nofF:
             break
 
@@ -341,49 +406,126 @@ def trackIt() :
 
 
 trackResults = trackIt()
+frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
+trackResults = np.concatenate((trackResults, frameNumbers), axis=1)
 #plotData(trackResults[:,0].cpu().numpy(), dataYR=trackResults[:,1].cpu().numpy())
 
 
 def analyzeResults() :
 
-    def sin_func(x, a, b, c, d):
-        return a + b * np.sin(c*x+d)
+    def fit_as_sin(dat, xdat, xxdat=None) :
 
-    def fit_as_sin(dat) :
+        def sin_func(x, a, b, c, d):
+            return a + b * np.sin(c*x+d)
+
         delta = dat.max() - dat.min()
         if delta == 0 :
             return dat
-        datS = len(dat)
-        xdat = math.pi * np.linspace(0, datS-1, datS) / datS
+        xsize = xdat[-1]-xdat[0]
+        x_norm = xdat / xsize
         meanDat = dat.mean()
         dat_norm = (dat - meanDat) / delta # normalize for fitting
-        popt, _ = curve_fit(sin_func, xdat, dat_norm)
-        dat_fit = delta * sin_func(xdat, *popt) + meanDat
-        return dat_fit
+        #popt, _ = curve_fit(sin_func, x_norm, dat_norm)
+        popt, _ = curve_fit(sin_func, x_norm, dat_norm,
+                            #p0 = [0, 0, math.pi, 0],
+                            bounds=([-1 , 0, 0,         0],
+                                    [ 1 , 1, 2*math.pi, 2*math.pi]))
+        dat_fit = meanDat + delta * sin_func(x_norm if xxdat is None else xxdat / xsize , *popt)
+        popt[0] = popt[0] * delta + meanDat
+        popt[1] *= delta
+        return dat_fit, popt
 
-    yres = trackResults[:,0].cpu().numpy()
-    yres_fit = fit_as_sin(yres)
-    #y_final = np.round(yres_fit - yres_fit.min())
-    y_final = np.round(yres_fit)
-    y_final -= y_final.min()
+    # first stage of cleaning: based on Y position which should not change more than 3 pixels between frames
+    def firstStageClean(rawRes) :
+        toRet = np.empty((0,3))
+        for curF in range(1,rawRes.shape[0]-1) :
+            if  abs(rawRes[curF,0]-rawRes[curF-1,0]) <= 3 \
+            and abs(rawRes[curF,0]-rawRes[curF+1,0]) <= 3 :
+                toRet = np.concatenate((toRet,rawRes[[curF],:]),axis=0)
+        if  abs(rawRes[0,0]-toRet[0,0]) <= 2 :
+            toRet = np.concatenate((rawRes[[0],:],toRet),axis=0)
+        if  abs(rawRes[-1,0]-toRet[-1,0]) <= 2 :
+            toRet = np.concatenate((toRet,rawRes[[-1],:]),axis=0)
+        return toRet
 
-    xres = trackResults[:,1].cpu().numpy()
-    xres_fit = fit_as_sin(xres)
-    xshift = np.round(xres_fit - xres)
-    xshift_fit = fit_as_sin(xshift)
-    #x_final = np.round(xshift_fit - xshift_fit.min())
-    x_final = np.round(xshift_fit)
-    x_final -= x_final.min()
+    cleanResults = firstStageClean(trackResults)
 
-    #plotData((x_final,y_final))
-    return np.stack((x_final,y_final),axis=1)
+    # second stage of cleaning: based on Y position which should not change more than 6 pixels away from median
+    def secondStageClean(rawRes) :
+        med = np.median(rawRes[:,0])
+        toRet = np.empty((0,3))
+        for curF in range(rawRes.shape[0]) :
+            if  abs(rawRes[curF,0]-med) <= 6 :
+                toRet = np.concatenate((toRet,rawRes[[curF],:]),axis=0)
+        return toRet
 
-outAr = analyzeResults()
-np.savetxt(args.out if args.out else sys.stdout.buffer, outAr)
+    cleanResults = secondStageClean(cleanResults)
+
+    # third stage of cleaning: based on both X and Y tracks,
+    # which should not be more than 3 pixels away from sin-fitted curves
+    def thirdStageClean(rawRes, fit) :
+        toRet = np.empty((0,3))
+        for curF in range(rawRes.shape[0]) :
+            if  abs( fit[curF,0] - rawRes[curF,0] ) <= 3 \
+            and abs( fit[curF,1] - rawRes[curF,1] ) <= 3 :
+                toRet = np.concatenate((toRet,rawRes[[curF],:]),axis=0)
+        return toRet
+
+    res_fit0, _ = fit_as_sin(cleanResults[:,0], cleanResults[:,-1], frameNumbers)
+    res_fit1, _ = fit_as_sin(cleanResults[:,1], cleanResults[:,-1], frameNumbers)
+    res_fit = np.concatenate((res_fit0, res_fit1), axis=1)
+    cleanResults = thirdStageClean(trackResults, res_fit)
+
+
+    # fill the gaps in data cleaned earlier
+    def fillCleaned(rawRes, frameNumbers) :
+        inter0 = np.interp(frameNumbers, rawRes[:,-1], rawRes[:,0])
+        inter1 = np.interp(frameNumbers, rawRes[:,-1], rawRes[:,1])
+        filled = np.concatenate((inter0, inter1, frameNumbers), axis=1)
+        return filled
+
+    posResults = fillCleaned(cleanResults, frameNumbers)
+    #plotData( finalResults[:,0], dataYR=finalResults[:,1] , dataX=finalResults[:,-1])
+
+    # make shifts from positions
+    shiftResults = posResults.copy()
+    shiftResults[:,0] -= np.round(np.mean(shiftResults[:,0]))
+    shiftResults[:,1] = np.round( shiftResults[:,1] - res_fit1[:,0] )
+
+    def shiftsClean(rawRes) :
+        while True :
+            interim = rawRes.copy()
+            somethingChanged = False
+            for curF in range(1,rawRes.shape[0]-1) :
+                if rawRes[curF-1] == rawRes[curF+1] :
+                    if rawRes[curF-1] != rawRes[curF] :
+                        interim[curF] = rawRes[curF-1]
+                        somethingChanged = True
+            if somethingChanged :
+                rawRes[()] = interim
+            else:
+                break
+        if rawRes[1] == rawRes[2] :
+            rawRes[0] = rawRes[1]
+        if rawRes[-2] == rawRes[-3] :
+            rawRes[-1] = rawRes[-2]
+        return rawRes
+
+    shiftsClean(shiftResults[:,0])
+    shiftResults[:,0] -= shiftResults[:,0].min()
+    shiftsClean(shiftResults[:,1])
+    shiftResults[:,1] -= shiftResults[:,1].min()
+
+    allResults = np.concatenate((shiftResults[:,:2], posResults[:,:2]), axis=1)
+
+    return allResults
+
+outResults = analyzeResults().astype(int)
+np.savetxt(args.out if args.out else sys.stdout.buffer, outResults, fmt='%i')
 
 if args.verbose :
-    plotData(trackResults[:,0].cpu().numpy(), dataYR=trackResults[:,1].cpu().numpy())
-    plotData(outAr[:,0], dataYR=outAr[:,1])
+    plotData( (outResults[:,0], outResults[:,1]),
+              dataYR=(outResults[:,2], outResults[:,3]))
 
 
 
