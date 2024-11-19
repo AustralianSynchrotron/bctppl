@@ -491,6 +491,7 @@ def analyzeResults() :
     shiftResults = posResults.copy()
     shiftResults[:,0] -= np.round(np.mean(shiftResults[:,0]))
     shiftResults[:,1] = np.round( shiftResults[:,1] - res_fit1[:,0] )
+    shiftResults[:,1] -= np.round(np.mean(shiftResults[:,1]))
 
     def shiftsClean(rawRes) :
         while True :

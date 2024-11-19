@@ -65,8 +65,6 @@ clargs::clargs(int argc, char *argv[])
 
 
 
-int bz_lround(double x) {return lround(x);}
-BZ_DECLARE_FUNCTION_RET(bz_lround, int);
 
 int main(int argc, char *argv[]) { {
   const clargs args(argc, argv) ;
@@ -75,14 +73,14 @@ int main(int argc, char *argv[]) { {
   Map shifts = LoadData(args.shifts);
   const Shape<2> ish = iVol.face();
   const int nofIm = iVol.slices();
-  if ( shifts.shape()[1] != 2 )
+  if ( shifts.shape()[1] < 2 )
     exit_on_error(args.command, "Unexpected number of columns inside input file \""+args.shifts+"\""
                                 " ("+toString(shifts.shape()[0])+" where 2 are expected.)");
   if ( shifts.shape()[0] != nofIm )
     exit_on_error(args.command, "Number of slices inside input stack ("+toString(nofIm)+")"
                                 " is same as number of shifts inside file \""+args.shifts+"\""
                                 " ("+toString(shifts.shape()[1])+".");
-  blitz::Array<int,2> iShifts(-bz_lround(shifts));
+  blitz::Array<int,2> iShifts(-blitz::cast<int>(shifts));
   blitz::Array<int,1> xShifts = iShifts(all,0);
   xShifts -= min(xShifts);
   const int xWid = max( abs(args.maxShifts(0)),  long(max(xShifts)) );

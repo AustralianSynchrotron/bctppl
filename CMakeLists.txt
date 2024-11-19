@@ -38,9 +38,9 @@ add_definitions(-DOPENCL_FOUND)
 add_definitions(-DCL_TARGET_OPENCL_VERSION=220)
 set(OPENCL_LL "OpenCL")
 
-find_package(Torch REQUIRED)
-find_package(PythonExtensions REQUIRED)
-set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS})
+#find_package(Torch REQUIRED)
+#find_package(PythonExtensions REQUIRED)
+#set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS})
 
 find_library(POPTL poptmx)
 find_path(POPTH poptmx.h REQUIRED)
@@ -62,13 +62,13 @@ target_link_libraries(trackit
   ${CTASCL}
 )
 
-add_library(remove_borders_ext MODULE
-    remove_borders.cu
-)
-python_extension_module(remove_borders_ext)
-target_link_libraries(remove_borders_ext ${TORCH_LIBRARIES})
-target_include_directories(remove_borders_ext PRIVATE ${TORCH_INCLUDE_DIRS})
-set_property(TARGET remove_borders_ext PROPERTY CXX_STANDARD 14)
+#add_library(remove_borders_ext MODULE
+#    remove_borders.cu
+#)
+#python_extension_module(remove_borders_ext)
+#target_link_libraries(remove_borders_ext ${TORCH_LIBRARIES})
+#target_include_directories(remove_borders_ext PRIVATE ${TORCH_INCLUDE_DIRS})
+#set_property(TARGET remove_borders_ext PROPERTY CXX_STANDARD 14)
 
 install(TARGETS align RUNTIME DESTINATION bin)
 
