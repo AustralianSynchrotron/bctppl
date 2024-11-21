@@ -1,0 +1,9 @@
+24721  2024-10-28_15:07:00 rm -rf aligned_sft_crp.hdf 
+24722  2024-10-28_15:10:52 cp ~/usr/src/sinogap/saves/gap2_cor.model_gen.pt .
+24723  2024-10-28_15:11:08 cp ~/usr/src/sinogap/saves/gap4_cor.model_gen.pt .
+24724  2024-10-28_15:11:12 cp ~/usr/src/sinogap/saves/gap8_cor.model_gen.pt .
+24725  2024-10-28_15:11:52 cp ~/usr/src/sinogap/model_1_gen.pt gap16_cor.model_gen.pt 
+24725  2024-10-28_15:11:56 ll
+24700  2024-10-28_15:12:10 ll -h
+24700  2024-10-28_15:12:51 cd ..
+29327  2024-11-19_17:50:55 vim ../test/.bash_history_pwd 

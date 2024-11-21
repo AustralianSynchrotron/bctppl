@@ -38,7 +38,7 @@ args = parser.parse_args()
 
 inputString = args.images
 maskString = args.mask
-device = torch.device('cuda:0')
+device = torch.device('cuda:1')
 
 
 def loadImage(imageName, expectedShape=None) :
@@ -155,8 +155,8 @@ if args.verbose :
     print("Reading input ...", end="")
 
 kernelImage = loadImage(os.path.dirname(__file__) + "/ball.tif")
+ksh = kernelImage.shape
 kernel = torch.tensor(kernelImage, device=device).unsqueeze(0).unsqueeze(0)
-ksh = kernel.shape
 st, mn = torch.std_mean(kernel)
 kernel = ( kernel - mn ) / st
 kernelBin = torch.where(kernel>0, 0, 1).to(torch.float32).to(device)
@@ -402,6 +402,7 @@ def trackIt() :
         if stopIndex >= nofF:
             break
 
+    results = results - ksh + 1 # to correct for padding
     return results
 
 

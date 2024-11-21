@@ -35,7 +35,7 @@ parser.add_argument('-v', '--verbose', action='store_true', default=False,
                     help='Plot results.')
 args = parser.parse_args()
 
-device = torch.device('cuda:0')
+device = torch.device('cuda:1')
 
 
 #%% FUNCS
@@ -100,7 +100,7 @@ set_seed(seed)
 @dataclass(frozen=True)
 class TCfg:
     exec = 0
-    device: torch.device = f"cuda:{exec}"
+    device: torch.device = device
     latentDim: int = 64
 
 class DCfg:
@@ -116,7 +116,7 @@ class DCfg:
 
 
 def load_model(model, model_path):
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     return model
 
 
@@ -196,6 +196,8 @@ def getOutData(outputString, shape) :
     return dset, trgH5F
 
 #%% MODELS
+
+modelsRoot = os.path.join( os.path.dirname(__file__) , "models" )
 
 class Generator2(nn.Module):
 
@@ -308,7 +310,7 @@ class Generator2(nn.Module):
         return self.fillImages(clone, noises)
 
 generator2 = Generator2()
-generator2 = load_model(generator2, model_path="models/gap2_cor.model_gen.pt" )
+generator2 = load_model(generator2, model_path = os.path.join(modelsRoot, "gap2_cor.model_gen.pt" ))
 generator2.to(TCfg.device)
 generator2.requires_grad_(False)
 generator2.eval()
@@ -432,7 +434,7 @@ class Generator4(nn.Module):
         return self.fillImages(clone, noises)
 
 generator4 = Generator4()
-generator4 = load_model(generator4, model_path="models/gap4_cor.model_gen.pt" )
+generator4 = load_model(generator4, model_path = os.path.join(modelsRoot, "gap4_cor.model_gen.pt" ))
 generator4.to(TCfg.device)
 generator4.requires_grad_(False)
 generator4.eval()
@@ -564,7 +566,7 @@ class Generator8(nn.Module):
         return self.fillImages(clone, noises)
 
 generator8 = Generator8()
-generator8 = load_model(generator8, model_path="models/gap8_cor.model_gen.pt" )
+generator8 = load_model(generator8, model_path = os.path.join(modelsRoot, "gap8_cor.model_gen.pt" ))
 generator8.to(TCfg.device)
 generator8.requires_grad_(False)
 generator8.eval()
@@ -692,7 +694,7 @@ class Generator(nn.Module):
         return self.fillImages(clone, noises)
 
 generator = Generator()
-generator = load_model(generator, model_path="models/gap16_cor.model_gen.pt" )
+generator = load_model(generator, model_path = os.path.join(modelsRoot, "gap16_cor.model_gen.pt" ))
 generator = generator.to(TCfg.device)
 generator = generator.requires_grad_(False)
 generator = generator.eval()
@@ -741,7 +743,7 @@ def fillSinogram(sinogram) :
 
     if lastBlock :
         newLast = torch.zeros(DCfg.gapSh, device=TCfg.device)
-        newLast[:-lastBlock,:] = results[-1,0,lastBlock:,:]
+        newLast[lastBlock:,:] = results[-1,0,lastBlock:,:]
         results[-1,0,...] = newLast
     preBlocks = torch.zeros((4,1,*DCfg.gapSh), device=TCfg.device)
     pstBlocks = torch.zeros((4,1,*DCfg.gapSh), device=TCfg.device)
@@ -776,7 +778,7 @@ def fillSinogram(sinogram) :
     return sinogram
 
 
-inData = getInData(args.images)
+inData = getInData(args.input)
 fsh = inData.shape[1:]
 mask = loadImage(args.mask, fsh)
 leftMask = np.ones(fsh, dtype=np.int8)
@@ -815,7 +817,7 @@ try :
                 gapW = gap.stop-gap.start
                 prevGap = gapsToRet[-1].stop if len(gapsToRet) else 0
                 nextGap = gapsIn[gapI+1].start if gapI < len(gapsIn)-1 else fsh[-1]
-                if  gapW <= 16 \
+                if  gapW <= 32 \
                 and gap.start - prevGap > 2*gapW \
                 and nextGap - gap.stop > 2*gapW :
                     stripe=np.s_[ gap.start - 2*gapW : gap.stop + 2*gapW]
