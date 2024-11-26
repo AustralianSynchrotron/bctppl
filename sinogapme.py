@@ -99,7 +99,7 @@ set_seed(seed)
 
 @dataclass(frozen=True)
 class TCfg:
-    exec = 0
+    exec = 1
     device: torch.device = device
     latentDim: int = 64
 
@@ -781,7 +781,7 @@ def fillSinogram(sinogram) :
 inData = getInData(args.input)
 fsh = inData.shape[1:]
 mask = loadImage(args.mask, fsh)
-leftMask = np.ones(fsh, dtype=np.int8)
+leftMask = np.ones(fsh, dtype=np.uint8)
 outData, outFile = getOutData(args.output, inData.shape)
 
 

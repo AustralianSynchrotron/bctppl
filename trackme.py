@@ -33,7 +33,7 @@ parser.add_argument('-m', '--mask', type=str, default="",
 parser.add_argument('-o', '--out', type=str, default="",
                     help='Output results. Stdout by default.')
 parser.add_argument('-v', '--verbose', action='store_true', default=False,
-                    help='Plot results.')
+                    help='Be verbose and save plot results.')
 args = parser.parse_args()
 
 inputString = args.images
@@ -514,9 +514,9 @@ def analyzeResults() :
         return rawRes
 
     shiftsClean(shiftResults[:,0])
-    shiftResults[:,0] -= shiftResults[:,0].min()
+    shiftResults[:,0] -= np.round( (shiftResults[:,0].min() + shiftResults[:,0].max()) / 2 )
     shiftsClean(shiftResults[:,1])
-    shiftResults[:,1] -= shiftResults[:,1].min()
+    shiftResults[:,1] -= np.round( (shiftResults[:,1].min() + shiftResults[:,1].max()) / 2 )
 
     allResults = np.concatenate((shiftResults[:,:2], posResults[:,:2]), axis=1)
 
@@ -526,8 +526,10 @@ outResults = analyzeResults().astype(int)
 np.savetxt(args.out if args.out else sys.stdout.buffer, outResults, fmt='%i')
 
 if args.verbose :
+    plotName = os.path.splitext(args.aout)[0] + "_plot.png"
     plotData( (outResults[:,0], outResults[:,1]),
-              dataYR=(outResults[:,2], outResults[:,3]))
+              dataYR=(outResults[:,2], outResults[:,3]),
+              saveTo = plotName, show = False)
 
 
 
