@@ -395,6 +395,8 @@ def trackIt() :
         with Pool() as p:
             resultsR = np.array(p.map(getPosInPool, dataInPool))
             results = np.concatenate((results,resultsR),axis=0)
+        del dataPad
+        del dataCorr
 
         if args.verbose :
             pbar.update(nofR)
@@ -526,7 +528,7 @@ outResults = analyzeResults().astype(int)
 np.savetxt(args.out if args.out else sys.stdout.buffer, outResults, fmt='%i')
 
 if args.verbose :
-    plotName = os.path.splitext(args.aout)[0] + "_plot.png"
+    plotName = os.path.splitext(args.out)[0] + "_plot.png"
     plotData( (outResults[:,0], outResults[:,1]),
               dataYR=(outResults[:,2], outResults[:,3]),
               saveTo = plotName, show = False)

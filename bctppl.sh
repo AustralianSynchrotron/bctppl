@@ -21,28 +21,31 @@ printhelp() {
 #  echo "  -z INT       Binning over multiple input prrojections."
 #  echo "  -Z INT[,INT] Binn factor(s)."
   echo "  -c SEG,SEG   Crop input image."
-  echo "  -r FLOAT     Rotate projections."
+#  echo "  -C SEG,SEG   Crop stitched image."
+  echo "  -r FLOAT     Rotate projections (deg)."
+  echo "  -z FLOAT     Obect to detector distance (mm)."
+  echo "  -w FLOAT     Wawelength (Angstrom)."
+  echo "  -p FLOAT     Pixel size (mum)."
+  echo "  -i FLOAT     Delta to beta ratio for phase retreival."
+  echo "  -R INT       Width of ring artefact filter."
 #  echo "  -i str       Type of gap fill algorithm: NO(default), NS, AT, AM"
 #  echo "  -t INT       Test mode: keeps intermediate images for the given projection."
+  echo "  -E           Skip stage if it's results are already present."
   echo "  -v           Be verbose to show progress."
   echo "  -h           Prints this help."
 }
 
 
-
-#printhelp() {
-#  echo "Usage: $0 -a <proj> -w <image width> -W <template width> <tracked org> <tracked sft>"
-#  echo "  Calculates extremes of jitter and stitch parameters."
-#  echo "OPTIONS:"
-#  echo "  -a INT       Number of steps to cover 180deg ark."
-#  echo "  -w INT       Width of the image where the ball was tracked."
-#  echo "  -W INT       Width of the ball template."
-#  echo "  -h           Prints this help."
-#}
-
 chkf () {
   if [ ! -e "$1" ] ; then
-    echo "ERROR! Non existing $2 path: \"$1\"" >&2
+    echo "ERROR! Non existing $2 path: $1" >&2
+    exit 1
+  fi
+}
+
+chkhdf () {
+  if ((  1 != $(tr -dc ':'  <<< "$1" | wc -c)  )) ; then
+    echo "Input ($1) must be of form 'hdfFile:hdfContainer'." >&2
     exit 1
   fi
 }
@@ -52,7 +55,7 @@ wrong_num() {
   if [ -n "$3" ] ; then
     opttxt="given by option $3"
   fi
-  echo "String \"$1\" $opttxt $2." >&2
+  echo "String $1 $opttxt $2." >&2
   printhelp >&2
   exit 1
 }
@@ -97,10 +100,17 @@ rotate=""
 fill=""
 testme=""
 beverbose=false
-allargs=""
 binn=""
 zinn=""
-while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
+o2d=0
+wav=""
+d2b=""
+pix=""
+ring=""
+skipExisting=false
+allargs=""
+#while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:Ehv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -112,7 +122,7 @@ while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
     d)  dfO=$OPTARG;;
     D)  dfS=$OPTARG;;
     m)  gmask=$OPTARG;;
-    M)  pmask=$OPTARG;;
+    #M)  pmask=$OPTARG;;
     f)  firstO=$OPTARG
         chkint "$firstO" "-$opt"
         chkNneg "$firstO" "-$opt"
@@ -130,13 +140,34 @@ while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
     r)  rotate=$OPTARG
         chknum "$rotate" "-$opt"
         ;;
-    z)  zinn=$OPTARG
-        chkint "$zinn" "-$opt"
-        #chkpos "$zinn" "-$opt"
+    z)  o2d=$OPTARG
+        chknum "$o2d" "-$opt"
+        chkpos "$o2d" "-$opt"
         ;;
-    Z)  binn=$OPTARG;;
-    i)  fill="$OPTARG";;
-    t)  testme="$OPTARG";;
+    w)  wav=$OPTARG
+        chknum "$wav" "-$opt"
+        chkpos "$wav" "-$opt"
+        ;;
+    p)  pix=$OPTARG
+        chknum "$pix" "-$opt"
+        chkpos "$pix" "-$opt"
+        ;;
+    i)  d2b=$OPTARG
+        chknum "$d2b" "-$opt"
+        chkpos "$d2b" "-$opt"
+        ;;
+    R)  ring=$OPTARG
+        chkint "$ring" "-$opt"
+        chkpos "$ring" "-$opt"
+        ;;
+    #z)  zinn=$OPTARG
+    #    chkint "$zinn" "-$opt"
+    #    chkpos "$zinn" "-$opt"
+    #    ;;
+    #Z)  binn=$OPTARG;;
+    #i)  fill="$OPTARG";;
+    #t)  testme="$OPTARG";;
+    E)  skipExisting=true;;
     v)  beverbose=true;;
     h)  printhelp ; exit 1 ;;
     \?) echo "ERROR! Invalid option: -$OPTARG" >&2 ; exit 1 ;;
@@ -154,12 +185,10 @@ fi
 chkhdf "$1"
 inp="$1"
 
-if [ -z "${2}" ] ; then
-  echo "No output directory was given." >&2
-  printhelp >&2
-  exit 1
+out=""
+if [ -n "${2}" ] ; then
+  out="${2}/"
 fi
-out="$2"
 
 if [ -z "$firstS" ] ; then
   echo "No first frame in shifted data was given (-F)." >&2
@@ -200,171 +229,217 @@ execMe() {
     echo "  $1"
   fi
   eval $1
+  if (( $? )) ; then
+    echo "Exiting after error in following command:." >&2
+    echo "  $1" >&2
+    exit 1
+  fi
+}
+
+announceStage() {
+  if $beverbose ; then
+    echo
+    echo "Stage ${1}: ${2}."
+  fi
+}
+
+needToMake() {
+  #echo searching for "$@"
+  if $skipExisting && ls "$@" > /dev/null 2> /dev/null ; then
+    echo "Found existing $*. Will NOT reproduce."
+    return 1
+  else
+    #echo "Not found" "$@"
+    return 0
+  fi
+}
+
+
+averageHdf2Tif () {
+  if ((  1 == $(tr -dc ':'  <<< "$1" | wc -c)  )) ; then # is hdf
+    outtif="$2"
+    if needToMake "$outtif" ; then
+      execMe "ctas v2v $beverboseO -b ,,0 $1 -o $outtif"
+    fi
+    echo "$outtif"
+  else
+    echo "$1"
+  fi
 }
 
 
 
 # create output dir
-execMe "mkdir -p \"$out\""
-
-# split
-splitOpt="$beverboseO"
-splitOpt="$splitOpt $( addOpt -b \"$bgO\" ) "
-splitOpt="$splitOpt $( addOpt -B \"$bgS\" ) "
-splitOpt="$splitOpt $( addOpt -d \"$dfO\" ) "
-if [ -n "$dfS" ] ; then
-  splitOpt="$splitOpt -D \"$dfS\" "
-elif [ -n "$dfO" ] ; then # same DF for org and sft
-  splitOpt="$splitOpt -D \"$dfO\" "
+announceStage 1 "preparing"
+if [ -n "$out" ] ; then
+  execMe "mkdir -p $out"
 fi
-splitOpt="$splitOpt $( addOpt -m \"$gmask\" ) "
-splitOpt="$splitOpt $( addOpt -M \"$pmask\" ) "
-splitOpt="$splitOpt $( addOpt -c $cropStr ) "
-splitOpt="$splitOpt $( addOpt -r $rotate ) "
-splitOpt="$splitOpt $( addOpt -z $binn ) "
-splitOpt="$splitOpt $( addOpt -Z $zinn ) "
-splitOpt="$splitOpt $( addOpt -i $fill ) "
-splitOut="\"$out\"/split_"
-execMe "$EXEPATH/split.sh  -f $firstO -F $firstO -e $end \"$inp\" $splitOpt $splitOut "
+bgO=$(averageHdf2Tif "$bgO" "${out}bg_org.tif")
+bgS=$(averageHdf2Tif "$bgS" "${out}bg_sft.tif")
+dfO=$(averageHdf2Tif "$dfO" "${out}df_org.tif")
+dfS=$(averageHdf2Tif "$dfS" "${out}df_sft.tif")
+
+
+# split into org and sft
+announceStage 2 "splitting input into original and shifted components"
+splitOut="${out}split_"
+if needToMake "${splitOut}mask.tif" "${splitOut}org.hdf" "${splitOut}sft.hdf" ; then
+  splitOpt="$beverboseO"
+  splitOpt="$splitOpt $( addOpt -b "$bgO" ) "
+  splitOpt="$splitOpt $( addOpt -B "$bgS" ) "
+  splitOpt="$splitOpt $( addOpt -d "$dfO" ) "
+  if [ -n "$dfS" ] ; then
+    splitOpt="$splitOpt -D $dfS "
+  elif [ -n "$dfO" ] ; then # same DF for org and sft
+    splitOpt="$splitOpt -D $dfO "
+  fi
+  splitOpt="$splitOpt $( addOpt -m "$gmask" ) "
+  pmask="$gmask"
+  splitOpt="$splitOpt $( addOpt -M "$pmask" ) "
+  splitOpt="$splitOpt $( addOpt -c $cropStr ) "
+  splitOpt="$splitOpt $( addOpt -r $rotate ) "
+  splitOpt="$splitOpt $( addOpt -z $binn ) "
+  splitOpt="$splitOpt $( addOpt -Z $zinn ) "
+  splitOpt="$splitOpt $( addOpt -i $fill ) "
+  execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $inp $splitOut "
+fi
+
 
 # track the ball
+announceStage 2 "tracking for jitter"
 trackOpt="$beverboseO"
 if [ -n "$gmask" ] || [ -n "$pmask" ] ; then
   trackOpt="$trackOpt -m ${splitOut}mask.tif "
 fi
-trackOut="\"$out\"/track_"
-execMe "$EXEPATH/trackme.py ${splitOut}org.hdf:/data -o ${trackOut}org.dat $trackOpt "
-execMe "$EXEPATH/trackme.py ${splitOut}sft.hdf:/data -o ${trackOut}sft.dat $trackOpt "
+trackOut="${out}track_"
+if needToMake "${trackOut}org.dat"  ; then
+  announceStage 2.1 "tracking jitter in original set"
+  execMe "$EXEPATH/trackme.py ${splitOut}org.hdf:/data -o ${trackOut}org.dat $trackOpt "
+fi
+if needToMake "${trackOut}sft.dat" ; then
+  announceStage 2.2 "tracking jitter in shifted set"
+  execMe "$EXEPATH/trackme.py ${splitOut}sft.hdf:/data -o ${trackOut}sft.dat $trackOpt "
+fi
+
 
 # analyze track results
+announceStage 2.3 "analyzing jitter tracking"
 splitWidth=$( h5ls -rf "${splitOut}org.hdf" | grep "/data" | sed "s:.* \([0-9]*\)}:\1:g" )
-ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1)
-resStr="$(execMe "$EXEPATH/analyzeTrack.sh -a $ark -w $splitWidth -W $ballWidth ${trackOut}*.dat")"
+ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
+resStr=$( "$EXEPATH/analyzeTrack.sh" -a $ark -w $splitWidth -W $ballWidth "${trackOut}"*.dat )
 read amplX amplY shiftX shiftY centdiv <<< "$resStr"
+amplX=$(( 2 * amplX ))
+amplY=$(( 2 * amplY ))
+
 
 # align
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-if [ -z "${1}" ] ; then
-  echo "No input path for tracked data in original position was given (argument 1)." >&2
-  printhelp >&2
-  exit 1
+announceStage 3 "aligning"
+alignOpt="$beverboseO"
+alignOpt="$alignOpt -S ${amplX},${amplY} -m ${splitOut}mask.tif "
+alignCom="$EXEPATH/build/align $alignOpt"
+alignOut="${out}align_"
+if needToMake "${alignOut}org.hdf" ; then
+  announceStage 3.1  "aligning original set"
+  execMe "$alignCom ${splitOut}org.hdf:/data -s ${trackOut}org.dat -o ${alignOut}org.hdf:/data"
 fi
-chkf "$1"
-orgLines=$(cat  "$1" | grep -c "")
-
-if [ -z "${2}" ] ; then
-  echo "No input path for tracked data in shifted position was given (argument 2)." >&2
-  printhelp >&2
-  exit 1
-fi
-chkf "$2"
-sftLines=$(cat  "$2" | grep -c "")
-
-if (( $orgLines != $sftLines )) ; then
-  echo "Different number of lines in original and shifted data: $orgLines != $sftLines." >&2
-  printhelp >&2
-  exit 1
-fi
-
-if (( $ark == 0 )) ; then
-  ark=$(( orgLines - 1 ))
-fi
-if (( $ark <4 )) ; then
-  echo "Number of steps in acquisition is too small: $ark < 4." >&2
-  printhelp >&2
-  exit 1
-fi
-
-if (( $iwidth == 0 )) ; then
-  echo "No image width was provided (-w option)." >&2
-  printhelp >&2
-  exit 1
-fi
-if (( $iwidth < 4 )) ; then
-  echo "Width of the image is too small to make sense: $iwidth < 4." >&2
-  printhelp >&2
-  exit 1
+if needToMake "${alignOut}sft.hdf"  ; then
+  announceStage 3.2 "aligning shifted set"
+  execMe "$alignCom ${splitOut}sft.hdf:/data -s ${trackOut}sft.dat -o ${alignOut}sft.hdf:/data"
 fi
 
 
-if (( $kwidth == 0 )) ; then
-  echo "No ball template width was provided (-W option)." >&2
-  printhelp >&2
-  exit 1
+# fill gaps
+announceStage 4 "filling gaps"
+fillOpt="$beverboseO"
+fillCom="$EXEPATH/sinogapme.py $fillOpt"
+fillOut="${out}fill_"
+if needToMake "${fillOut}org.hdf" ; then
+  announceStage 4.1 "filling gaps in original set"
+  execMe "$fillCom ${alignOut}org.hdf:/data -m ${alignOut}org_mask.tif ${fillOut}org.hdf:/data"
 fi
-if (( $kwidth < 2 )) ; then
-  echo "Width of the ball template is too small to make sense: $kwidth < 2." >&2
-  printhelp >&2
-  exit 1
-fi
-if (( $kwidth >= $iwidth )) ; then
-  echo "Width of the ball template cannot be larger than image width: $kwidth >= $iwidth 2." >&2
-  printhelp >&2
-  exit 1
+if needToMake "${fillOut}sft.hdf" ; then
+  announceStage 4.2 "filling gaps in shifted set."
+  execMe "$fillCom ${alignOut}sft.hdf:/data -m ${alignOut}sft_mask.tif ${fillOut}sft.hdf:/data"
 fi
 
 
+# stitch
+announceStage 5  "stitching original and shifted sets"
+stitchOut="stitched.hdf"
+if needToMake "$stitchOut" ; then
+  stitchOpt="$beverboseO"
+  stitchOpt="$stitchOpt -f 0 -F 0 -a $ark -s $firstS -g ${shiftX},${shiftY} -c $centdiv"
+  stitchOpt="$stitchOpt -m ${fillOut}org_mask.tif "
+  execMe "imbl-shift.sh $stitchOpt ${fillOut}org.hdf:/data ${fillOut}sft.hdf:/data ${stitchOut}:/data"
+fi
 
-minY=$( cat "$1" | cut -d' ' -f 1 | sort -g | head -n 1)
-maxY=$( cat "$1" | cut -d' ' -f 1 | sort -g | tail -n 1)
-#amplY=$(( -minY > maxY ? -minY : maxY ))
-amplY=$(( maxY - minY ))
-minX=$( cat "$1" | cut -d' ' -f 2 | sort -g | head -n 1)
-maxX=$( cat "$1" | cut -d' ' -f 2 | sort -g | tail -n 1)
-#amplX=$(( -minX > maxX ? -minX : maxX ))
-amplX=$(( maxX - minX ))
 
-read corY corX0 posY posX0 <<< $(cat "$1" | head -n 1)
-posX0=$(( posX0 - corX0 ))
-read corY corXP posY posXP <<< $(cat "$1" | head -n $ark | tail -n 1)
-posXP=$(( posXP - corXP ))
-cent_org=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
-posY_org=$(( posY - corY ))
+# phase contrast
+announceStage 6 "inline phase contrast"
+ipcOut="$stitchOut"
+if [ -z "$d2b" ] ; then # no IPC
+  if $beverbose ; then
+    echo "Skipping this stage because no delta to beta ratio provided (-i option)"
+  fi
+else
+  ipcOut="${out}ipc.hdf"
+  if needToMake "$ipcOut" ; then
+    ipcOpt="$beverboseO"
+    ipcOpt="$ipcOpt -e -d d2b"
+    if (( o2d == 0 )) ; then
+      echo "No object to detector provided for phase contrast (-z option). Exiting" >&2
+      exit 1
+    else
+      ipcOpt="$ipcOpt -z $o2d"
+    fi
+    if [ -z "$wav" ] ; then
+      echo "No wavelength provided for phase contrast (-w option). Exiting" >&2
+      exit 1
+    else
+      ipcOpt="$ipcOpt -w $wav"
+    fi
+    if [ -z "$pix" ] ; then
+      echo "No pixel size provided for phase contrast (-p option). Exiting" >&2
+      exit 1
+    else
+      ipcOpt="$ipcOpt -r $pix"
+    fi
+    execMe "ctas ipc $ipcOpt ${stitchOut}:/data -o ${ipcOut}:/data"
+  fi
+fi
 
-read corY corX0 posY posX0 <<< $(cat "$2" | head -n 1)
-posX0=$(( posX0 - corX0 ))
-read corY corXP posY posXP <<< $(cat "$2" | head -n $ark | tail -n 1)
-posXP=$(( posXP - corXP ))
-cent_sft=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
-posY_sft=$(( posY - corY ))
 
-shiftX=$( echo " scale=1 ; ( $cent_org - $cent_sft ) " | bc )
-shiftY=$(( posY_org - posY_sft ))
+# ring artefact removal
+announceStage 7 "ring artefact correction"
+ringOut="$ipcOut"
+if [ -z "$ring" ] ; then # no ring removal
+  if $beverbose ; then
+    echo "Skipping this stage because no ring filter size provided (-R option)."
+  fi
+else
+  ringOut="${out}ring.hdf"
+  if needToMake "$ringOut" ; then
+    ringOpt="$beverboseO"
+    execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y ${ipcOut}:/data:y"
+  fi
+fi
 
-centdiv=$( echo " scale=1 ; ( $cent_org - 0.5 * $iwidth ) " | bc )
 
-echo $amplX $amplY $shiftX $shiftY $centdiv
+# CT
+announceStage 8 "CT reconstruction"
+ctOut="${out}rec.hdf"
+if needToMake "$ctOut" ; then
+  ctOpt="$beverboseO"
+  ctOpt="$ctOpt $( addOpt -r $pix ) "
+  ctOpt="$ctOpt $( addOpt -w $wav ) "
+  step=$(echo "scale=8 ; 180 / ( $ark - 1 )" | bc )
+  execMe "ctas ct $ctOpt -k a -a $step ${ringOut}:/data:y -o ${ctOut}:/data"
+fi
+
+if $beverbose ; then
+  echo
+  echo "All done."
+fi
 
 
 
