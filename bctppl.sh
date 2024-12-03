@@ -1,7 +1,7 @@
 #!/bin/bash
 
-EXEPATH="$(dirname "$(realpath "$0")" )"
-
+export EXEPATH="$(dirname "$(realpath "$0")" )"
+source "$EXEPATH/commonsource.sh"
 
 
 printhelp() {
@@ -34,56 +34,6 @@ printhelp() {
   echo "  -v           Be verbose to show progress."
   echo "  -h           Prints this help."
 }
-
-
-chkf () {
-  if [ ! -e "$1" ] ; then
-    echo "ERROR! Non existing $2 path: $1" >&2
-    exit 1
-  fi
-}
-
-chkhdf () {
-  if ((  1 != $(tr -dc ':'  <<< "$1" | wc -c)  )) ; then
-    echo "Input ($1) must be of form 'hdfFile:hdfContainer'." >&2
-    exit 1
-  fi
-}
-
-wrong_num() {
-  opttxt=""
-  if [ -n "$3" ] ; then
-    opttxt="given by option $3"
-  fi
-  echo "String $1 $opttxt $2." >&2
-  printhelp >&2
-  exit 1
-}
-
-chknum () {
-  if ! (( $( echo " $1 == $1 " | bc -l 2>/dev/null ) )) ; then
-    wrong_num "$1" "is not a number" "$2"
-  fi
-}
-
-chkint () {
-  if ! [ "$1" -eq "$1" ] 2>/dev/null ; then
-    wrong_num "$1" "is not an integer" "$2"
-  fi
-}
-
-chkpos () {
-  if (( $(echo "0 >= $1" | bc -l) )); then
-    wrong_num "$1" "is not strictly positive" "$2"
-  fi
-}
-
-chkNneg () {
-  if (( $(echo "0 > $1" | bc -l) )); then
-    wrong_num "$1" "is negative" "$2"
-  fi
-}
-
 
 ark=""
 bgO=""
@@ -189,6 +139,10 @@ out=""
 if [ -n "${2}" ] ; then
   out="${2}/"
 fi
+LOGFILE="${out}.ppl.log"
+echo "" >> "$LOGFILE"
+echo "# In \"$PWD\"" >> "$LOGFILE"
+echo "# $0 $*" >> "$LOGFILE"
 
 if [ -z "$firstS" ] ; then
   echo "No first frame in shifted data was given (-F)." >&2
@@ -228,6 +182,7 @@ execMe() {
     echo "Executing:"
     echo "  $1"
   fi
+  echo "$1" >> "$LOGFILE"
   eval $1
   if (( $? )) ; then
     echo "Exiting after error in following command:." >&2
@@ -385,7 +340,7 @@ else
   ipcOut="${out}ipc.hdf"
   if needToMake "$ipcOut" ; then
     ipcOpt="$beverboseO"
-    ipcOpt="$ipcOpt -e -d d2b"
+    ipcOpt="$ipcOpt -e -d $d2b"
     if (( o2d == 0 )) ; then
       echo "No object to detector provided for phase contrast (-z option). Exiting" >&2
       exit 1

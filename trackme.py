@@ -38,7 +38,7 @@ args = parser.parse_args()
 
 inputString = args.images
 maskString = args.mask
-device = torch.device('cuda:1')
+device = torch.device('cuda:0')
 
 
 def loadImage(imageName, expectedShape=None) :

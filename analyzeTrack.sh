@@ -2,6 +2,7 @@
 
 EXEPATH="$(dirname "$(realpath "$0")" )"
 PATH="$EXEPATH:$PATH"
+source "$EXEPATH/commonsource.sh"
 
 printhelp() {
   echo "Usage: $0 -a <proj> -w <image width> -W <template width> <tracked org> <tracked sft>"
@@ -12,48 +13,6 @@ printhelp() {
   echo "  -W INT       Width of the ball template."
   echo "  -h           Prints this help."
 }
-
-chkf () {
-  if [ ! -e "$1" ] ; then
-    echo "ERROR! Non existing $2 path: \"$1\"" >&2
-    exit 1
-  fi
-}
-
-wrong_num() {
-  opttxt=""
-  if [ -n "$3" ] ; then
-    opttxt="given by option $3"
-  fi
-  echo "String \"$1\" $opttxt $2." >&2
-  printhelp >&2
-  exit 1
-}
-
-chknum () {
-  if ! (( $( echo " $1 == $1 " | bc -l 2>/dev/null ) )) ; then
-    wrong_num "$1" "is not a number" "$2"
-  fi
-}
-
-chkint () {
-  if ! [ "$1" -eq "$1" ] 2>/dev/null ; then
-    wrong_num "$1" "is not an integer" "$2"
-  fi
-}
-
-chkpos () {
-  if (( $(echo "0 >= $1" | bc -l) )); then
-    wrong_num "$1" "is not strictly positive" "$2"
-  fi
-}
-
-chkNneg () {
-  if (( $(echo "0 > $1" | bc -l) )); then
-    wrong_num "$1" "is negative" "$2"
-  fi
-}
-
 
 ark=0
 kwidth=0
