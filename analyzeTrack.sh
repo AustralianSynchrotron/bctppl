@@ -112,24 +112,26 @@ amplX=$(( maxX - minX ))
 
 read corY corX0 posY posX0 <<< $(cat "$1" | head -n 1)
 posX0=$(( posX0 - corX0 ))
-read corY corXP posY posXP <<< $(cat "$1" | head -n $ark | tail -n 1)
+read corY corXP posY posXP <<< $(cat "$1" | head -n $(( ark + 1 )) | tail -n 1)
 posXP=$(( posXP - corXP ))
 cent_org=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
 posY_org=$(( posY - corY ))
 
 read corY corX0 posY posX0 <<< $(cat "$2" | head -n 1)
 posX0=$(( posX0 - corX0 ))
-read corY corXP posY posXP <<< $(cat "$2" | head -n $ark | tail -n 1)
+read corY corXP posY posXP <<< $(cat "$2" | head -n $(( ark + 1 )) | tail -n 1)
 posXP=$(( posXP - corXP ))
 cent_sft=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
 posY_sft=$(( posY - corY ))
 
-shiftX=$( echo " scale=0 ; ( $cent_org - $cent_sft ) / 1 " | bc )
+shiftX=$( echo " scale=1 ; ( $cent_org - $cent_sft ) / 1 " | bc )
+shiftX=$( printf "%.0f" $shiftX ) # rounding
 shiftY=$(( posY_org - posY_sft ))
 
 centdiv=$( echo " scale=1 ; ( $cent_org - 0.5 * $iwidth ) " | bc )
 
 echo $amplX $amplY $shiftX $shiftY $centdiv
+echo
 
 
 

@@ -28,9 +28,11 @@ printhelp() {
   echo "  -p FLOAT     Pixel size (mum)."
   echo "  -i FLOAT     Delta to beta ratio for phase retreival."
   echo "  -R INT       Width of ring artefact filter."
+  echo "  -J           Correct jitter only in vertical axis."
+  echo "  -X           Clean up all iterim files."
 #  echo "  -i str       Type of gap fill algorithm: NO(default), NS, AT, AM"
 #  echo "  -t INT       Test mode: keeps intermediate images for the given projection."
-  echo "  -E           Skip stage if it's results are already present."
+  echo "  -E           Skip stages which have their results already present."
   echo "  -v           Be verbose to show progress."
   echo "  -h           Prints this help."
 }
@@ -49,7 +51,6 @@ end=""
 rotate=""
 fill=""
 testme=""
-beverbose=false
 binn=""
 zinn=""
 o2d=0
@@ -57,10 +58,14 @@ wav=""
 d2b=""
 pix=""
 ring=""
+jonly=false
 skipExisting=false
+beverbose=false
+cleanup=false
+
 allargs=""
 #while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
-while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:Ehv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:XJEhv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -117,7 +122,9 @@ while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:Ehv" opt ; do
     #Z)  binn=$OPTARG;;
     #i)  fill="$OPTARG";;
     #t)  testme="$OPTARG";;
+    J)  jonly=true;;
     E)  skipExisting=true;;
+    X)  cleanup=true;;
     v)  beverbose=true;;
     h)  printhelp ; exit 1 ;;
     \?) echo "ERROR! Invalid option: -$OPTARG" >&2 ; exit 1 ;;
@@ -261,24 +268,27 @@ fi
 
 
 # track the ball
-announceStage 2 "tracking for jitter"
+announceStage 3 "tracking for jitter"
 trackOpt="$beverboseO"
 if [ -n "$gmask" ] || [ -n "$pmask" ] ; then
   trackOpt="$trackOpt -m ${splitOut}mask.tif "
 fi
+#if $jonly ; then
+#  trackOpt="$trackOpt -J "
+#fi
 trackOut="${out}track_"
 if needToMake "${trackOut}org.dat"  ; then
-  announceStage 2.1 "tracking jitter in original set"
+  announceStage 3.1 "tracking jitter in original set"
   execMe "$EXEPATH/trackme.py ${splitOut}org.hdf:/data -o ${trackOut}org.dat $trackOpt "
 fi
 if needToMake "${trackOut}sft.dat" ; then
-  announceStage 2.2 "tracking jitter in shifted set"
+  announceStage 3.2 "tracking jitter in shifted set"
   execMe "$EXEPATH/trackme.py ${splitOut}sft.hdf:/data -o ${trackOut}sft.dat $trackOpt "
 fi
 
 
 # analyze track results
-announceStage 2.3 "analyzing jitter tracking"
+announceStage 3.3 "analyzing jitter tracking"
 splitWidth=$( h5ls -rf "${splitOut}org.hdf" | grep "/data" | sed "s:.* \([0-9]*\)}:\1:g" )
 ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 resStr=$( "$EXEPATH/analyzeTrack.sh" -a $ark -w $splitWidth -W $ballWidth "${trackOut}"*.dat )
@@ -288,49 +298,52 @@ amplY=$(( 2 * amplY ))
 
 
 # align
-announceStage 3 "aligning"
+announceStage 4 "aligning"
 alignOpt="$beverboseO"
 alignOpt="$alignOpt -S ${amplX},${amplY} -m ${splitOut}mask.tif "
+if $jonly ; then
+  alignOpt="$alignOpt -J "
+fi
 alignCom="$EXEPATH/build/align $alignOpt"
 alignOut="${out}align_"
 if needToMake "${alignOut}org.hdf" ; then
-  announceStage 3.1  "aligning original set"
+  announceStage 4.1  "aligning original set"
   execMe "$alignCom ${splitOut}org.hdf:/data -s ${trackOut}org.dat -o ${alignOut}org.hdf:/data"
 fi
 if needToMake "${alignOut}sft.hdf"  ; then
-  announceStage 3.2 "aligning shifted set"
+  announceStage 4.2 "aligning shifted set"
   execMe "$alignCom ${splitOut}sft.hdf:/data -s ${trackOut}sft.dat -o ${alignOut}sft.hdf:/data"
 fi
 
 
 # fill gaps
-announceStage 4 "filling gaps"
+announceStage 5 "filling gaps"
 fillOpt="$beverboseO"
 fillCom="$EXEPATH/sinogapme.py $fillOpt"
 fillOut="${out}fill_"
 if needToMake "${fillOut}org.hdf" ; then
-  announceStage 4.1 "filling gaps in original set"
+  announceStage 5.1 "filling gaps in original set"
   execMe "$fillCom ${alignOut}org.hdf:/data -m ${alignOut}org_mask.tif ${fillOut}org.hdf:/data"
 fi
 if needToMake "${fillOut}sft.hdf" ; then
-  announceStage 4.2 "filling gaps in shifted set."
+  announceStage 5.2 "filling gaps in shifted set"
   execMe "$fillCom ${alignOut}sft.hdf:/data -m ${alignOut}sft_mask.tif ${fillOut}sft.hdf:/data"
 fi
 
 
 # stitch
-announceStage 5  "stitching original and shifted sets"
+announceStage 6  "stitching original and shifted sets"
 stitchOut="stitched.hdf"
 if needToMake "$stitchOut" ; then
   stitchOpt="$beverboseO"
-  stitchOpt="$stitchOpt -f 0 -F 0 -a $ark -s $firstS -g ${shiftX},${shiftY} -c $centdiv"
+  stitchOpt="$stitchOpt -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g ${shiftX},${shiftY} -c $centdiv"
   stitchOpt="$stitchOpt -m ${fillOut}org_mask.tif "
   execMe "imbl-shift.sh $stitchOpt ${fillOut}org.hdf:/data ${fillOut}sft.hdf:/data ${stitchOut}:/data"
 fi
 
 
 # phase contrast
-announceStage 6 "inline phase contrast"
+announceStage 7 "inline phase contrast"
 ipcOut="$stitchOut"
 if [ -z "$d2b" ] ; then # no IPC
   if $beverbose ; then
@@ -365,7 +378,7 @@ fi
 
 
 # ring artefact removal
-announceStage 7 "ring artefact correction"
+announceStage 8 "ring artefact correction"
 ringOut="$ipcOut"
 if [ -z "$ring" ] ; then # no ring removal
   if $beverbose ; then
@@ -381,13 +394,13 @@ fi
 
 
 # CT
-announceStage 8 "CT reconstruction"
+announceStage 9 "CT reconstruction"
 ctOut="${out}rec.hdf"
 if needToMake "$ctOut" ; then
   ctOpt="$beverboseO"
   ctOpt="$ctOpt $( addOpt -r $pix ) "
   ctOpt="$ctOpt $( addOpt -w $wav ) "
-  step=$(echo "scale=8 ; 180 / ( $ark - 1 )" | bc )
+  step=$(echo "scale=8 ; 180 / $ark " | bc )
   execMe "ctas ct $ctOpt -k a -a $step ${ringOut}:/data:y -o ${ctOut}:/data"
 fi
 

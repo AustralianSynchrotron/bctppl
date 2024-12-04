@@ -12,6 +12,7 @@ struct clargs {
   ImagePath outimages;
   Path mask;
   PointI<2> maxShifts;
+  bool only; //< align only y (vertical axis)
   bool beverbose;
     /// \CLARGSF
   clargs(int argc, char *argv[]);
@@ -20,6 +21,7 @@ struct clargs {
 
 clargs::clargs(int argc, char *argv[])
   : maxShifts(0,0)
+  , only(false)
   , beverbose(false)
 {
   poptmx::OptionTable table
@@ -41,6 +43,7 @@ clargs::clargs(int argc, char *argv[])
     .add(poptmx::OPTION, &maxShifts, 'S', "maxShifts", "Maximum shifts.", "" )
     .add(poptmx::OPTION, &mask, 'm', "mask", "Mask of the original input volume.",
          "If provided, corresponding combined mask will be created.")
+    .add(poptmx::OPTION, &only, 'J', "onlyY", "Align only vertical axis.", "" )
     .add_standard_options(&beverbose);
 
   if ( ! table.parse(argc,argv) )
@@ -81,13 +84,17 @@ int main(int argc, char *argv[]) { {
                                 " is same as number of shifts inside file \""+args.shifts+"\""
                                 " ("+toString(shifts.shape()[1])+".");
   blitz::Array<int,2> iShifts(-blitz::cast<int>(shifts));
-  blitz::Array<int,1> xShifts = iShifts(all,0);
-  xShifts -= min(xShifts);
-  const int xWid = max( abs(args.maxShifts(0)),  long(max(xShifts)) );
-  blitz::Array<int,1> yShifts = iShifts(all,1);
-  yShifts -= min(yShifts);
-  const int yWid = max( abs(args.maxShifts(1)),  long(max(yShifts)) );
-  const Crop<2> crp( Segment(yWid, ish(0)-yWid), Segment(xWid, ish(1)-xWid) );
+
+  blitz::Array<int,1> xShifts = iShifts(all,1);
+  if (args.only)
+    xShifts = 0;
+  const int xWid = max( abs(args.maxShifts(0)),  long(max(xShifts)-min(xShifts)) );
+  xShifts += xWid;
+
+  blitz::Array<int,1> yShifts = iShifts(all,0);
+  const int yWid = max( abs(args.maxShifts(1)),  long(max(yShifts)-min(yShifts)) );
+  yShifts += yWid;
+
   const Shape<2> osh( ish(0)-2*yWid , ish(1)-2*xWid );
   Map mask, omask;
   if (!args.mask.empty()) {
@@ -96,11 +103,13 @@ int main(int argc, char *argv[]) { {
     omask.resize(osh);
     omask = 1.0;
   }
+  const Crop<2> crp( Segment(2*yWid, osh(0)+2*yWid), Segment(2*xWid, osh(1)+2*xWid) );
   SaveVolumeBySlice oVol( args.outimages, Shape<3>( nofIm, osh(0), osh(1) ) );
+
   ProgressBar bar(args.beverbose, "Aligning", nofIm);
   InThread::execute( nofIm, [&](long int curIm){
     Map iIm(ish);
-    Map genMap(ish(0)+yWid, ish(1)+xWid);
+    Map genMap(ish(0)+2*yWid, ish(1)+2*xWid);
     iVol.readTo(curIm, iIm);
     genMap( blitz::Range(yShifts(curIm), yShifts(curIm) + ish(0)-1),
             blitz::Range(xShifts(curIm), xShifts(curIm) + ish(1)-1) ) = iIm;

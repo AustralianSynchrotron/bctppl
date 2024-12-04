@@ -32,6 +32,8 @@ parser.add_argument('-m', '--mask', type=str, default="",
                     help='Mask of the input stack.')
 parser.add_argument('-o', '--out', type=str, default="",
                     help='Output results. Stdout by default.')
+parser.add_argument('-J', '--only', action='store_true', default=False,
+                    help='Will analyze only Y coordinate with X assumed perfect.')
 parser.add_argument('-v', '--verbose', action='store_true', default=False,
                     help='Be verbose and save plot results.')
 args = parser.parse_args()
@@ -130,6 +132,33 @@ def plotImage(image) :
     plt.imshow(image, cmap='gray')
     plt.axis("off")
     plt.show()
+
+
+def unsqeeze4dim(tens):
+    orgDims = tens.dim()
+    if tens.dim() == 2 :
+        tens = tens.unsqueeze(0)
+    if tens.dim() == 3 :
+        tens = tens.unsqueeze(1)
+    return tens, orgDims
+
+
+def squeezeOrg(tens, orgDims):
+    if orgDims == tens.dim():
+        return tens
+    if tens.dim() != 4 or orgDims > 4 or orgDims < 2:
+        raise Exception(f"Unexpected dimensions to squeeze: {tens.dim()} {orgDims}.")
+    if orgDims < 4 :
+        if tens.shape[1] > 1:
+            raise Exception(f"Cant squeeze dimension 1 in: {tens.shape}.")
+        tens = tens.squeeze(1)
+    if orgDims < 3 :
+        if tens.shape[0] > 1:
+            raise Exception(f"Cant squeeze dimension 0 in: {tens.shape}.")
+        tens = tens.squeeze(0)
+    return tens
+
+
 
 
 def getData(inputString):
@@ -306,6 +335,21 @@ def selectVisually() :
                 return False
 
 
+
+
+
+def normalizeWithMask(ten, msk) :
+    ten, odim = unsqeeze4dim(ten)
+    maskSum = torch.count_nonzero(msk)
+    ten *= msk
+    mn = ten.sum(dim=(-2,-1)).view(-1,1,1,1) / maskSum
+    ten -= mn
+    ten *= msk
+    st = ten.norm(p=2, dim=(-2,-1)).view(-1,1,1,1) / maskSum
+    ten /= st
+    return squeezeOrg(ten,odim)
+
+
 def removeBorders(img, mask) :
 
   sh = img.shape
@@ -345,6 +389,7 @@ def removeBorders(img, mask) :
     cleaLine(ln, ms, True)
     cleaLine(ln, ms, False)
 
+
 # I can move removeNorders to GPU and use it instead of Pool multiprocessing.
 # But on our 50-100 cores it will save max 5 minutes per dataset - not worth the efforts.
 def getPosInPool(img) :
@@ -357,16 +402,6 @@ def getPosInPool(img) :
 
 def trackIt() :
     global maskPad, maskCount
-
-    def normalize(ten, msk) :
-        maskSum = torch.count_nonzero(msk)
-        ten *= msk
-        mn = ten.sum(dim=(-2,-1)).view(-1,1,1,1) / maskSum
-        ten -= mn
-        ten *= msk
-        st = ten.norm(p=2, dim=(-2,-1)).view(-1,1,1,1) / maskSum
-        ten /= st
-        return ten
 
     torch.no_grad()
 
@@ -388,7 +423,7 @@ def trackIt() :
         dataPad[ ... , ksh[-2]-1 : -ksh[-2]+1, ksh[-1]-1 : -ksh[-1]+1 ] = \
             torch.from_numpy(dataN[fRange,...]).unsqueeze(1)
         dataPad = dataPad.to(device)
-        dataPad = normalize(dataPad, maskPad)
+        dataPad = normalizeWithMask(dataPad, maskPad)
         dataCorr = fn.conv2d(dataPad, kernel) / maskCount
         dataNP = dataCorr.cpu().numpy()
         dataInPool = [ dataNP[cursl,0,...] for cursl in range(nofR) ]
@@ -408,13 +443,37 @@ def trackIt() :
     return results
 
 
-trackResults = trackIt()
-frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
-trackResults = np.concatenate((trackResults, frameNumbers), axis=1)
-#plotData(trackResults[:,0].cpu().numpy(), dataYR=trackResults[:,1].cpu().numpy())
+def trackItFine(poses) :
+    # area around expected position +/- 5 pixels and ksh on all sides
+    dataBuf = torch.zeros( (dsh[0], ksh[0]+10, ksh[1]+10) )
+    maskBuf = torch.zeros( (dsh[0], ksh[0]+10, ksh[1]+10) )
+    for cursl in range(dsh[0]) :
+        pos = poses[cursl,...]
+        imFrom = ( max(0, pos[0] - 5 ) , max(0, pos[1] - 5  ) )
+        imTo = ( min(dsh[0], pos[0] + 5 + ksh[0]) , min(dsh[1], pos[1] + 5 + ksh[1]) )
+        arSz = ( imTo[0] - imFrom[0], imTo[1] - imFrom[1])
+        dstFrom = (imFrom[0] - pos[0] + 5 , imFrom[1] - pos[1] + 5  )
+        dataBuf[cursl, dstFrom[0] : dstFrom[0]+arSz[0] , dstFrom[1] : dstFrom[1]+arSz[1] ] = \
+            torch.from_numpy(dataN)[cursl , imFrom[0]:imTo[0], imFrom[1]:imTo[1] ]
+        maskBuf[cursl, dstFrom[0] : dstFrom[0]+arSz[0] , dstFrom[1] : dstFrom[1]+arSz[1] ] = \
+            torch.from_numpy(maskImage)[imFrom[0]:imTo[0], imFrom[1]:imTo[1] ]
+        dataBuf[cursl,...] = normalizeWithMask( dataBuf[cursl,...], maskBuf[cursl,...] )
+    dataBuf = dataBuf.unsqueeze(1).to(device)
+    dataBuf = fn.conv2d(dataBuf, kernel).squeeze()
+    maskBuf = maskBuf.unsqueeze(1).to(device)
+    maskBuf = fn.conv2d(maskBuf, torch.ones_like(kernel, device=device)).squeeze()
+    dataBuf /= maskBuf
+    bufSh = ( dataBuf.shape[-2], dataBuf.shape[-1] )
+    for cursl in range(dsh[0]) :
+        pos = poses[cursl,...]
+        cpos = np.unravel_index(torch.argmax(dataBuf[cursl,...]).item(), bufSh)
+        pos[0] +=  cpos[0] - 5
+        pos[1] +=  cpos[1] - 5
+
+    return poses
 
 
-def analyzeResults() :
+def analyzeResults(analyzeme) :
 
     def fit_as_sin(dat, xdat, xxdat=None) :
 
@@ -451,7 +510,7 @@ def analyzeResults() :
             toRet = np.concatenate((toRet,rawRes[[-1],:]),axis=0)
         return toRet
 
-    cleanResults = firstStageClean(trackResults)
+    cleanResults = firstStageClean(analyzeme)
 
     # second stage of cleaning: based on Y position which should not change more than 6 pixels away from median
     def secondStageClean(rawRes) :
@@ -477,7 +536,7 @@ def analyzeResults() :
     res_fit0, _ = fit_as_sin(cleanResults[:,0], cleanResults[:,-1], frameNumbers)
     res_fit1, _ = fit_as_sin(cleanResults[:,1], cleanResults[:,-1], frameNumbers)
     res_fit = np.concatenate((res_fit0, res_fit1), axis=1)
-    cleanResults = thirdStageClean(trackResults, res_fit)
+    cleanResults = thirdStageClean(analyzeme, res_fit)
 
 
     # fill the gaps in data cleaned earlier
@@ -524,14 +583,29 @@ def analyzeResults() :
 
     return allResults
 
-outResults = analyzeResults().astype(int)
-np.savetxt(args.out if args.out else sys.stdout.buffer, outResults, fmt='%i')
 
+
+trackResults = trackIt()
+frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
+results = np.concatenate((trackResults, frameNumbers), axis=1)
+results = analyzeResults(results).astype(int)
+results = trackItFine( results[:,2:4] )
+results = np.concatenate((results, frameNumbers), axis=1)
+results = analyzeResults(results).astype(int)
+
+if args.only :
+    results[:,3] -= results[:,1]
+    results[:,1] = 0
+
+
+np.savetxt(args.out if args.out else sys.stdout.buffer, results, fmt='%i')
 if args.verbose :
     plotName = os.path.splitext(args.out)[0] + "_plot.png"
-    plotData( (outResults[:,0], outResults[:,1]),
-              dataYR=(outResults[:,2], outResults[:,3]),
+    plotData( (results[:,0], results[:,1]),
+              dataYR=(results[:,2], results[:,3]),
               saveTo = plotName, show = False)
+
+
 
 
 
