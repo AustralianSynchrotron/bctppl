@@ -320,6 +320,8 @@ if $beverbose ; then
   echo "Rotation centre deviation: $centdiv"
   echo "True ark (for indication only): $trueArk"
 fi
+shiftX=$( printf "%.0f" $shiftX ) # rounding
+shiftY=$( printf "%.0f" $shiftY ) # rounding
 
 # align
 bumpstage

@@ -98,8 +98,8 @@ v_popt, _ = curve_fit(v_func, f_pos, v_pos,
 
 print( round(max ( resOrg[:,1].max(), resSft[:,1].max() ) - min( resOrg[:,1].min(), resSft[:,1].min() )),
        round(max ( resOrg[:,0].max(), resSft[:,0].max() ) - min( resOrg[:,0].min(), resSft[:,0].min() )),
-       round(-h_popt[4]),
-       round(-v_popt[1]),
+       -h_popt[4],
+       -v_popt[1],
        h_popt[0] - (args.iwidth - 1) / 2,
        h_popt[2]
        )
