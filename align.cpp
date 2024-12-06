@@ -88,11 +88,11 @@ int main(int argc, char *argv[]) { {
   blitz::Array<int,1> xShifts = iShifts(all,1);
   if (args.only)
     xShifts = 0;
-  const int xWid = max( abs(args.maxShifts(0)),  long(max(xShifts)-min(xShifts)) );
+  const int xWid = max( abs(args.maxShifts(1)),  long(max(xShifts)-min(xShifts)) );
   xShifts += xWid;
 
   blitz::Array<int,1> yShifts = iShifts(all,0);
-  const int yWid = max( abs(args.maxShifts(1)),  long(max(yShifts)-min(yShifts)) );
+  const int yWid = max( abs(args.maxShifts(0)),  long(max(yShifts)-min(yShifts)) );
   yShifts += yWid;
 
   const Shape<2> osh( ish(0)-2*yWid , ish(1)-2*xWid );

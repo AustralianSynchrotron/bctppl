@@ -101,34 +101,43 @@ fi
 
 
 
-minY=$( cat "$1" | cut -d' ' -f 1 | sort -g | head -n 1)
-maxY=$( cat "$1" | cut -d' ' -f 1 | sort -g | tail -n 1)
-#amplY=$(( -minY > maxY ? -minY : maxY ))
+minY=$( cat "$1" "$2" | grep -v '#' | cut -d' ' -f 1 | sort -g | head -n 1)
+maxY=$( cat "$1" "$2" | grep -v '#' | cut -d' ' -f 1 | sort -g | tail -n 1)
 amplY=$(( maxY - minY ))
-minX=$( cat "$1" | cut -d' ' -f 2 | sort -g | head -n 1)
-maxX=$( cat "$1" | cut -d' ' -f 2 | sort -g | tail -n 1)
-#amplX=$(( -minX > maxX ? -minX : maxX ))
+minX=$( cat "$1" "$2" | grep -v '#' | cut -d' ' -f 2 | sort -g | head -n 1)
+maxX=$( cat "$1" "$2" | grep -v '#' | cut -d' ' -f 2 | sort -g | tail -n 1)
 amplX=$(( maxX - minX ))
 
-read corY corX0 posY posX0 <<< $(cat "$1" | head -n 1)
-posX0=$(( posX0 - corX0 ))
-read corY corXP posY posXP <<< $(cat "$1" | head -n $(( ark + 1 )) | tail -n 1)
-posXP=$(( posXP - corXP ))
-cent_org=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
-posY_org=$(( posY - corY ))
+read posYo <<< "$(cat "$1" | head -n 1 | cut -d' ' -f 2)"
+read posXo <<< "$(cat "$1" | head -n 2 | tail -n 1 | cut -d' ' -f 2)"
+read posYs <<< "$(cat "$2" | head -n 1 | cut -d' ' -f 2)"
+read posXs <<< "$(cat "$2" | head -n 2 | tail -n 1 | cut -d' ' -f 2)"
 
-read corY corX0 posY posX0 <<< $(cat "$2" | head -n 1)
-posX0=$(( posX0 - corX0 ))
-read corY corXP posY posXP <<< $(cat "$2" | head -n $(( ark + 1 )) | tail -n 1)
-posXP=$(( posXP - corXP ))
-cent_sft=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
-posY_sft=$(( posY - corY ))
-
-shiftX=$( echo " scale=1 ; ( $cent_org - $cent_sft ) / 1 " | bc )
+shiftX=$( echo " scale=2 ; ( $posXo - $posXs )" | bc  )
 shiftX=$( printf "%.0f" $shiftX ) # rounding
-shiftY=$(( posY_org - posY_sft ))
+shiftY=$( echo " scale=2 ; ( $posYo - $posYs )" | bc  )
+shiftY=$( printf "%.0f" $shiftY ) # rounding
+centdiv=$( echo " scale=2 ; ( $posXo - 0.5 * $iwidth + 0.5 * $kwidth )" | bc  )
 
-centdiv=$( echo " scale=1 ; ( $cent_org - 0.5 * $iwidth ) " | bc )
+#read corY corX0 posY posX0 <<< $(cat "$1" | grep -v '#' | head -n 1)
+#posX0=$(( posX0 - corX0 ))
+#read corY corXP posY posXP <<< $(cat "$1" | grep -v '#' | head -n $(( ark + 1 )) | tail -n 1)
+#posXP=$(( posXP - corXP ))
+#cent_org=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
+#posY_org=$(( posY - corY ))
+#
+#read corY corX0 posY posX0 <<< $(cat "$2" | grep -v '#' | head -n 1)
+#posX0=$(( posX0 - corX0 ))
+#read corY corXP posY posXP <<< $(cat "$2" | grep -v '#' | head -n $(( ark + 1 )) | tail -n 1)
+#posXP=$(( posXP - corXP ))
+#cent_sft=$( echo " scale=1 ; ( $posX0 + $posXP + $kwidth ) / 2 " | bc )
+#posY_sft=$(( posY - corY ))
+#
+#shiftX=$( echo " scale=1 ; ( $cent_org - $cent_sft ) / 1 " | bc )
+#shiftX=$( printf "%.0f" $shiftX ) # rounding
+#shiftY=$(( posY_org - posY_sft ))
+#
+#centdiv=$( echo " scale=1 ; ( $cent_org - 0.5 * $iwidth ) " | bc )
 
 echo $amplX $amplY $shiftX $shiftY $centdiv
 echo

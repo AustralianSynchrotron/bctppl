@@ -473,6 +473,8 @@ def trackItFine(poses) :
     return poses
 
 
+
+
 def analyzeResults(analyzeme) :
 
     def fit_as_sin(dat, xdat, xxdat=None) :
@@ -488,6 +490,7 @@ def analyzeResults(analyzeme) :
         meanDat = dat.mean()
         dat_norm = (dat - meanDat) / delta # normalize for fitting
         #popt, _ = curve_fit(sin_func, x_norm, dat_norm)
+
         popt, _ = curve_fit(sin_func, x_norm, dat_norm,
                             #p0 = [0, 0, math.pi, 0],
                             bounds=([-1 , 0, 0,         0],
@@ -495,6 +498,7 @@ def analyzeResults(analyzeme) :
         dat_fit = meanDat + delta * sin_func(x_norm if xxdat is None else xxdat / xsize , *popt)
         popt[0] = popt[0] * delta + meanDat
         popt[1] *= delta
+
         return dat_fit, popt
 
     # first stage of cleaning: based on Y position which should not change more than 3 pixels between frames
@@ -524,7 +528,7 @@ def analyzeResults(analyzeme) :
     cleanResults = secondStageClean(cleanResults)
 
     # third stage of cleaning: based on both X and Y tracks,
-    # which should not be more than 3 pixels away from sin-fitted curves
+    # which should not be more than 3 pixels away from fitted curves
     def thirdStageClean(rawRes, fit) :
         toRet = np.empty((0,3))
         for curF in range(rawRes.shape[0]) :
@@ -533,7 +537,8 @@ def analyzeResults(analyzeme) :
                 toRet = np.concatenate((toRet,rawRes[[curF],:]),axis=0)
         return toRet
 
-    res_fit0, _ = fit_as_sin(cleanResults[:,0], cleanResults[:,-1], frameNumbers)
+    #res_fit0, _ = fit_as_sin(cleanResults[:,0], cleanResults[:,-1], frameNumbers)
+    res_fit0 = np.full(frameNumbers.shape, np.median(cleanResults[:,0]))
     res_fit1, _ = fit_as_sin(cleanResults[:,1], cleanResults[:,-1], frameNumbers)
     res_fit = np.concatenate((res_fit0, res_fit1), axis=1)
     cleanResults = thirdStageClean(analyzeme, res_fit)
@@ -551,52 +556,54 @@ def analyzeResults(analyzeme) :
 
     # make shifts from positions
     shiftResults = posResults.copy()
-    shiftResults[:,0] -= np.round(np.mean(shiftResults[:,0]))
-    shiftResults[:,1] = np.round( shiftResults[:,1] - res_fit1[:,0] )
-    shiftResults[:,1] -= np.round(np.mean(shiftResults[:,1]))
+    shiftResults[:,0] = shiftResults[:,0] - res_fit0[:,0]
+    shiftResults[:,1] = shiftResults[:,1] - res_fit1[:,0]
+    #shiftResults[:,1] -= np.round(np.mean(shiftResults[:,1]))
 
+    # remove peaks
     def shiftsClean(rawRes) :
         while True :
             interim = rawRes.copy()
             somethingChanged = False
             for curF in range(1,rawRes.shape[0]-1) :
-                if rawRes[curF-1] == rawRes[curF+1] :
-                    if rawRes[curF-1] != rawRes[curF] :
-                        interim[curF] = rawRes[curF-1]
-                        somethingChanged = True
+                avNeib = 0.5 * (rawRes[curF-1] + rawRes[curF+1])
+                if abs( rawRes[curF-1] - rawRes[curF+1] ) < 1 \
+                and abs ( avNeib - rawRes[curF] ) >= 1 :
+                    interim[curF] = avNeib
+                    somethingChanged = True
             if somethingChanged :
                 rawRes[()] = interim
             else:
                 break
-        if rawRes[1] == rawRes[2] :
-            rawRes[0] = rawRes[1]
-        if rawRes[-2] == rawRes[-3] :
-            rawRes[-1] = rawRes[-2]
+        # deal with ends
+        delta = rawRes[2] - rawRes[1]
+        if abs(delta) < 1 :
+            rawRes[0] = rawRes[1] - delta
+        delta = rawRes[-3] - rawRes[-2]
+        if abs(delta) < 1 :
+            rawRes[-1] = rawRes[-2] - delta
         return rawRes
 
     shiftsClean(shiftResults[:,0])
-    shiftResults[:,0] -= np.round( (shiftResults[:,0].min() + shiftResults[:,0].max()) / 2 )
+    #shiftResults[:,0] -= np.round( (shiftResults[:,0].min() + shiftResults[:,0].max()) / 2 )
     shiftsClean(shiftResults[:,1])
-    shiftResults[:,1] -= np.round( (shiftResults[:,1].min() + shiftResults[:,1].max()) / 2 )
+    #shiftResults[:,1] -= np.round( (shiftResults[:,1].min() + shiftResults[:,1].max()) / 2 )
 
     allResults = np.concatenate((shiftResults[:,:2], posResults[:,:2]), axis=1)
 
     return allResults
 
 
-
 trackResults = trackIt()
 frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
 results = np.concatenate((trackResults, frameNumbers), axis=1)
-results = analyzeResults(results).astype(int)
-results = trackItFine( results[:,2:4] )
+results = analyzeResults(results)
+results = trackItFine( np.round(results[:,2:4]).astype(int) )
 results = np.concatenate((results, frameNumbers), axis=1)
-results = analyzeResults(results).astype(int)
-
+results = np.round(analyzeResults(results)).astype(int)
 if args.only :
     results[:,3] -= results[:,1]
     results[:,1] = 0
-
 
 np.savetxt(args.out if args.out else sys.stdout.buffer, results, fmt='%i')
 if args.verbose :
