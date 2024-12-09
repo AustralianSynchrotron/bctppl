@@ -56,12 +56,6 @@ target_link_libraries(align
   ${CTASCL}
 )
 
-add_executable(trackit trackit.cpp)
-target_link_libraries(trackit
-  poptmx
-  ${CTASCL}
-)
-
 #add_library(remove_borders_ext MODULE
 #    remove_borders.cu
 #)
