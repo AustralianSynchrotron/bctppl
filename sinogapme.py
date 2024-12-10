@@ -851,7 +851,7 @@ try :
                 leftMask[curSl,gap] = 0
         outData[:,curSl,:] = inSinogram.cpu().numpy()
 
-    leftMaskName = "".join(args.output.split(":")[0].split(".")[:-1])+"_mask.tif"
+    leftMaskName = ".".join(args.output.split(".")[:-1])+"_mask.tif"
     leftMask *= 255
     tifffile.imwrite(leftMaskName, leftMask)
 
