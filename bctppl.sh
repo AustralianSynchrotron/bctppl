@@ -148,6 +148,7 @@ if [ -n "${2}" ] ; then
   out="${2}/"
 fi
 LOGFILE="${out}.ppl.log"
+EXECRES="${out}.res"
 echo "" >> "$LOGFILE"
 echo "# In \"$PWD\"" >> "$LOGFILE"
 echo "# $(realpath "$0") $allOpts " >> "$LOGFILE"
@@ -182,20 +183,6 @@ fi
 addOpt() {
   if [ -n "$2" ] ; then
     echo "$1 $2"
-  fi
-}
-
-execMe() {
-  if $beverbose ; then
-    echo "Executing:"
-    echo "  $1"
-  fi
-  echo "$1" >> "$LOGFILE"
-  eval $1
-  if (( $? )) ; then
-    echo "Exiting after error in following command:." >&2
-    echo "  $1" >&2
-    exit 1
   fi
 }
 
@@ -237,9 +224,9 @@ averageHdf2Tif () {
     if needToMake "$outtif" ; then
       execMe "ctas v2v $beverboseO -b ,,0 $1 -o $outtif"
     fi
-    echo "$outtif"
+    echo "$outtif" > "$EXECRES"
   else
-    echo "$1"
+    echo "$1" > "$EXECRES"
   fi
 }
 
@@ -251,10 +238,14 @@ announceStage "preparing"
 if [ -n "$out" ] ; then
   execMe "mkdir -p $out"
 fi
-bgO=$(averageHdf2Tif "$bgO" "${out}${pstage}_bg_org.tif")
-bgS=$(averageHdf2Tif "$bgS" "${out}${pstage}_bg_sft.tif")
-dfO=$(averageHdf2Tif "$dfO" "${out}${pstage}_df_org.tif")
-dfS=$(averageHdf2Tif "$dfS" "${out}${pstage}_df_sft.tif")
+averageHdf2Tif "$bgO" "${out}${pstage}_bg_org.tif"
+bgO="$(cat "$EXECRES")"
+averageHdf2Tif "$bgS" "${out}${pstage}_bg_sft.tif"
+bgS="$(cat "$EXECRES")"
+averageHdf2Tif "$dfO" "${out}${pstage}_df_org.tif"
+dfO="$(cat "$EXECRES")"
+averageHdf2Tif "$dfS" "${out}${pstage}_df_sft.tif"
+dfS="$(cat "$EXECRES")"
 
 
 # split into org and sft
@@ -306,14 +297,8 @@ fi
 announceStage 3 "analyzing jitter tracking"
 splitWidth=$( h5ls -rf "${splitOut}org.hdf" | grep "/data" | sed "s:.* \([0-9]*\)}:\1:g" )
 ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
-midshift
-comm="$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth ${trackOut}*.dat"
-if $beverbose ; then
-  echo "Executing:"
-  echo "  $comm"
-fi
-echo "$1" >> "$LOGFILE"
-read amplX amplY shiftX shiftY centdiv trueArk <<< "$( eval $comm )"
+execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth ${trackOut}*.dat > $EXECRES"
+read amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
 if $beverbose ; then
   echo "Jitter amplitudes: $amplX $amplY"
   echo "Shift: $shiftX $shiftY"
