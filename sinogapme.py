@@ -35,7 +35,7 @@ parser.add_argument('-v', '--verbose', action='store_true', default=False,
                     help='Plot results.')
 args = parser.parse_args()
 
-device = torch.device('cuda:0')
+device = torch.device('cuda:1')
 
 
 #%% FUNCS

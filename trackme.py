@@ -40,7 +40,7 @@ args = parser.parse_args()
 
 inputString = args.images
 maskString = args.mask
-device = torch.device('cuda:0')
+device = torch.device('cuda:1')
 
 
 def loadImage(imageName, expectedShape=None) :
@@ -445,14 +445,15 @@ def trackIt() :
 
 def trackItFine(poses) :
     # area around expected position +/- 5 pixels and ksh on all sides
-    dataBuf = torch.zeros( (dsh[0], ksh[0]+10, ksh[1]+10) )
-    maskBuf = torch.zeros( (dsh[0], ksh[0]+10, ksh[1]+10) )
+    neib=5
+    dataBuf = torch.zeros( (dsh[0], ksh[0]+2*neib, ksh[1]+2*neib) )
+    maskBuf = torch.zeros( (dsh[0], ksh[0]+2*neib, ksh[1]+2*neib) )
     for cursl in range(dsh[0]) :
         pos = poses[cursl,...]
-        imFrom = ( max(0, pos[0] - 5 ) , max(0, pos[1] - 5  ) )
-        imTo = ( min(dsh[0], pos[0] + 5 + ksh[0]) , min(dsh[1], pos[1] + 5 + ksh[1]) )
+        imFrom = ( max(0, pos[0] - neib ) , max(0, pos[1] - neib  ) )
+        imTo = ( min(dsh[0], pos[0] + neib + ksh[0]) , min(dsh[1], pos[1] + neib + ksh[1]) )
         arSz = ( imTo[0] - imFrom[0], imTo[1] - imFrom[1])
-        dstFrom = (imFrom[0] - pos[0] + 5 , imFrom[1] - pos[1] + 5  )
+        dstFrom = (imFrom[0] - pos[0] + neib , imFrom[1] - pos[1] + neib  )
         dataBuf[cursl, dstFrom[0] : dstFrom[0]+arSz[0] , dstFrom[1] : dstFrom[1]+arSz[1] ] = \
             torch.from_numpy(dataN)[cursl , imFrom[0]:imTo[0], imFrom[1]:imTo[1] ]
         maskBuf[cursl, dstFrom[0] : dstFrom[0]+arSz[0] , dstFrom[1] : dstFrom[1]+arSz[1] ] = \
@@ -467,8 +468,8 @@ def trackItFine(poses) :
     for cursl in range(dsh[0]) :
         pos = poses[cursl,...]
         cpos = np.unravel_index(torch.argmax(dataBuf[cursl,...]).item(), bufSh)
-        pos[0] +=  cpos[0] - 5
-        pos[1] +=  cpos[1] - 5
+        pos[0] +=  cpos[0] - neib
+        pos[1] +=  cpos[1] - neib
 
     return poses
 
