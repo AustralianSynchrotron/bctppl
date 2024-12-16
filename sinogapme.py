@@ -22,6 +22,7 @@ import h5py
 import tifffile
 import tqdm
 
+myPath = os.path.dirname(os.path.realpath(__file__))
 
 parser = argparse.ArgumentParser(description=
     'Fill sinograms with sinogap NN.')
@@ -35,8 +36,16 @@ parser.add_argument('-v', '--verbose', action='store_true', default=False,
                     help='Plot results.')
 args = parser.parse_args()
 
-device = torch.device('cuda:1')
 
+device = torch.device('cuda:0')
+try:
+    localCfgDict = dict()
+    exec(open(os.path.join(myPath, ".local.cfg")).read(),localCfgDict)
+    device = torch.device(localCfgDict['torchdevice'])
+except KeyError:
+    raise
+except:
+    pass
 
 #%% FUNCS
 

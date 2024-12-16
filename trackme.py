@@ -23,6 +23,7 @@ import tqdm
 from scipy.optimize import curve_fit
 from multiprocessing import Pool
 
+myPath = os.path.dirname(os.path.realpath(__file__))
 
 parser = argparse.ArgumentParser(description=
     'Tracks the ball in the BCT experiment.')
@@ -38,9 +39,16 @@ parser.add_argument('-v', '--verbose', action='store_true', default=False,
                     help='Be verbose and save plot results.')
 args = parser.parse_args()
 
-inputString = args.images
-maskString = args.mask
-device = torch.device('cuda:1')
+device = torch.device('cuda:0')
+try:
+    localCfgDict = dict()
+    exec(open(os.path.join(myPath, ".local.cfg")).read(),localCfgDict)
+    device = torch.device(localCfgDict['torchdevice'])
+except KeyError:
+    raise
+except:
+    pass
+
 
 
 def loadImage(imageName, expectedShape=None) :
@@ -181,7 +189,7 @@ def getData(inputString):
 
 
 if args.verbose :
-    print("Reading input ...", end="")
+    print("Reading input ...", end="", flush=True)
 
 kernelImage = loadImage(os.path.dirname(__file__) + "/ball.tif")
 ksh = kernelImage.shape
@@ -190,13 +198,13 @@ st, mn = torch.std_mean(kernel)
 kernel = ( kernel - mn ) / st
 kernelBin = torch.where(kernel>0, 0, 1).to(torch.float32).to(device)
 
-data = getData(inputString)
+data = getData(args.images)
 dataN = np.empty(data.shape, dtype=np.float32)
 data.read_direct(dataN)
 dsh = data.shape[1:]
 nofF = data.shape[0]
 
-maskImage = loadImage(maskString, dsh) if maskString else np.ones(dsh)
+maskImage = loadImage(args.mask, dsh) if args.mask else np.ones(dsh)
 maskImage /= maskImage.max()
 maskPad = torch.zeros( (1, 1, dsh[-2] + 2*ksh[-2] - 2, dsh[-1] + 2*ksh[-1] - 2 ) )
 maskPad[..., ksh[-2]-1 : -ksh[-2]+1, ksh[-1]-1 : -ksh[-1]+1 ] = torch.from_numpy(maskImage).unsqueeze(0).unsqueeze(0)
@@ -208,7 +216,7 @@ minArea = math.prod(ksh) // 56
 maskCorr = torch.where( maskBall > minArea, 1, 0).squeeze().cpu().numpy()
 
 if args.verbose :
-    print("Read.")
+    print(" Read.")
     print("Tracking the ball.")
 
 
@@ -598,6 +606,7 @@ def analyzeResults(analyzeme) :
 trackResults = trackIt()
 frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
 results = np.concatenate((trackResults, frameNumbers), axis=1)
+#np.savetxt(".rawtracking.dat", trackResults, fmt='%i')
 results = analyzeResults(results)
 results = trackItFine( np.round(results[:,2:4]).astype(int) )
 results = np.concatenate((results, frameNumbers), axis=1)

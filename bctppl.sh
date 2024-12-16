@@ -73,10 +73,10 @@ while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:XJEhv" opt ; do
         chkint "$ark" "-$opt"
         chkpos "$ark" "-$opt"
         ;;
-    b)  bgO=$OPTARG;;
-    B)  bgS=$OPTARG;;
-    d)  dfO=$OPTARG;;
-    D)  dfS=$OPTARG;;
+    b)  bgO="$bgO $OPTARG";;
+    B)  bgS="$bgS $OPTARG";;
+    d)  dfO="$dfO $OPTARG";;
+    D)  dfS="$dfS $OPTARG";;
     m)  gmask=$OPTARG;;
     #M)  pmask=$OPTARG;;
     f)  firstO=$OPTARG
@@ -219,15 +219,11 @@ needToMake() {
 
 
 averageHdf2Tif () {
-  if ((  1 == $(tr -dc ':'  <<< "$1" | wc -c)  )) ; then # is hdf
-    outtif="$2"
-    if needToMake "$outtif" ; then
-      execMe "ctas v2v $beverboseO -b ,,0 $1 -o $outtif"
-    fi
-    echo "$outtif" > "$EXECRES"
-  else
-    echo "$1" > "$EXECRES"
+  outtif="$2"
+  if needToMake "$outtif" ; then
+    execMe "ctas v2v $beverboseO -b ,,0 $1 -o $outtif"
   fi
+  echo "$outtif" > "$EXECRES"
 }
 
 
