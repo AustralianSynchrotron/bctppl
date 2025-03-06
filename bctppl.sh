@@ -30,7 +30,8 @@ printhelp() {
   echo "  -i FLOAT     Delta to beta ratio for phase retreival."
   echo "  -R INT       Width of ring artefact filter."
   echo "  -J           Correct jitter only in vertical axis."
-  echo "  -X           Clean up iterim files."
+  echo "  -K           Keep iterim files."
+  echo "  -I           Use output folder instead of memory to store interim files."
 #  echo "  -i str       Type of gap fill algorithm: NO(default), NS, AT, AM"
 #  echo "  -t INT       Test mode: keeps intermediate images for the given projection."
   echo "  -E           Skip stages which have their results already present."
@@ -62,11 +63,12 @@ ring=""
 jonly=false
 skipExisting=false
 beverbose=false
-cleanup=false
+cleanup=true
+inplace=false
 
 allargs=""
 #while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
-while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:XJEhv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKJEhv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -123,9 +125,10 @@ while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:XJEhv" opt ; do
     #Z)  binn=$OPTARG;;
     #i)  fill="$OPTARG";;
     #t)  testme="$OPTARG";;
+    I)  inplace=true;;
     J)  jonly=true;;
     E)  skipExisting=true;;
-    X)  cleanup=true;;
+    K)  cleanup=false;;
     v)  beverbose=true;;
     h)  printhelp ; exit 1 ;;
     \?) echo "ERROR! Invalid option: -$OPTARG" >&2 ; exit 1 ;;
@@ -146,7 +149,20 @@ inp="$1"
 out=""
 if [ -n "${2}" ] ; then
   out="${2}/"
+else
+  out="./"
 fi
+iout=""
+if $inplace ; then
+  iout="${out}"
+else
+  iout="/dev/shm/bctppl/"
+  if ! $skipExisting ; then
+    rm -rf "$iout" # to clean up after any previous left overs
+  fi
+  mkdir -p "$iout"
+fi
+
 LOGFILE="${out}.ppl.log"
 EXECRES="${out}.res"
 echo "" >> "$LOGFILE"
@@ -219,11 +235,30 @@ needToMake() {
 
 
 averageHdf2Tif () {
-  outtif="$2"
-  if needToMake "$outtif" ; then
-    execMe "ctas v2v $beverboseO -b ,,0 $1 -o $outtif"
+  if [ -z "$1" ] ; then
+    : > "$EXECRES"
+  else
+    outtif="$2"
+    if needToMake "$outtif" ; then
+      execMe "ctas v2v $beverboseO -b ,,0 $1 -o $outtif"
+    fi
+    echo "$outtif" > "$EXECRES"
   fi
-  echo "$outtif" > "$EXECRES"
+}
+
+
+cleanUp() {
+  if $cleanup ; then
+    if $beverbose ; then
+      echo "Cleaning up:" "${1}"*
+    fi
+    rm -rf "${1}"*
+  elif ! $inplace ; then
+    if $beverbose ; then
+      echo "Moving interim volumes to keep in ${out}:" "${1}"*
+    fi
+    mv "${1}"* "${out}"
+  fi
 }
 
 
@@ -231,8 +266,8 @@ averageHdf2Tif () {
 # create output dir
 bumpstage
 announceStage "preparing"
-if [ -n "$out" ] ; then
-  execMe "mkdir -p $out"
+if [ -n "${out}" ] ; then
+  execMe "mkdir -p ${out}"
 fi
 averageHdf2Tif "$bgO" "${out}${pstage}_bg_org.tif"
 bgO="$(cat "$EXECRES")"
@@ -247,7 +282,7 @@ dfS="$(cat "$EXECRES")"
 # split into org and sft
 bumpstage
 announceStage "splitting input into original and shifted components"
-splitOut="${out}${pstage}_split_"
+splitOut="${iout}${pstage}_split_"
 if needToMake "${splitOut}mask.tif" "${splitOut}org.hdf" "${splitOut}sft.hdf" ; then
   splitOpt="$beverboseO"
   splitOpt="$splitOpt $( addOpt -b "$bgO" ) "
@@ -313,7 +348,7 @@ if $jonly ; then
   alignOpt="$alignOpt -J "
 fi
 alignCom="$EXEPATH/build/align $alignOpt"
-alignOut="${out}${pstage}_align_"
+alignOut="${iout}${pstage}_align_"
 if needToMake "${alignOut}org.hdf" ; then
   announceStage 1  "aligning original set"
   execMe "$alignCom ${splitOut}org.hdf:/data -s ${trackOut}org.dat -o ${alignOut}org.hdf:/data"
@@ -322,6 +357,7 @@ if needToMake "${alignOut}sft.hdf"  ; then
   announceStage 2 "aligning shifted set"
   execMe "$alignCom ${splitOut}sft.hdf:/data -s ${trackOut}sft.dat -o ${alignOut}sft.hdf:/data"
 fi
+cleanUp "${splitOut}"
 
 
 # fill gaps
@@ -329,27 +365,38 @@ bumpstage
 announceStage "filling gaps"
 fillOpt="$beverboseO"
 fillCom="$EXEPATH/sinogapme.py $fillOpt"
-fillOut="${out}${pstage}_fill_"
-if needToMake "${fillOut}org.hdf" ; then
-  announceStage 1 "filling gaps in original set"
-  execMe "$fillCom ${alignOut}org.hdf:/data -m ${alignOut}org_mask.tif ${fillOut}org.hdf:/data"
-fi
-if needToMake "${fillOut}sft.hdf" ; then
-  announceStage 2 "filling gaps in shifted set"
-  execMe "$fillCom ${alignOut}sft.hdf:/data -m ${alignOut}sft_mask.tif ${fillOut}sft.hdf:/data"
-fi
+fillOut="${iout}${pstage}_fill_"
+fillone() {
+  fI="${alignOut}${1}"
+  fO="${fillOut}${1}"
+  if needToMake "${fO}.hdf" ; then
+    announceStage "${2}" "filling gaps in ${1} set"
+    execMe "$fillCom ${fI}.hdf:/data -m ${fI}_mask.tif ${fO}.hdf:/data"
+    leftMask="${fO}_mask_left.tif"
+    if [ -e "$leftMask" ] && [ "1" != "$( convert "$leftMask" -format '%[fx:minima]' info: )" ] ; then
+      announceStage "${2}.1" "filling gaps left after sinogap"
+      execMe "ctas proj $beverboseO ${fO}.hdf:/data -o ${fO}_2.hdf:/data -M $leftMask -I AM"
+      rm "${fO}.hdf"
+      mv "${fO}_2.hdf" "${fO}.hdf"
+    fi
+  fi
+}
+fillone "org" 1
+fillone "sft" 2
+cleanUp "${alignOut}"
 
 
 # stitch
 bumpstage
 announceStage "stitching original and shifted sets"
-stitchOut="${out}${pstage}_stitched.hdf"
+stitchOut="${iout}${pstage}_stitched.hdf"
 if needToMake "$stitchOut" ; then
   stitchOpt="$beverboseO"
   stitchOpt="$stitchOpt -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g ${shiftX},${shiftY} -c $centdiv"
   stitchOpt="$stitchOpt -m ${fillOut}org_mask.tif "
   execMe "imbl-shift.sh $stitchOpt ${fillOut}org.hdf:/data ${fillOut}sft.hdf:/data ${stitchOut}:/data"
 fi
+cleanUp "${fillOut}"
 
 
 # phase contrast
@@ -416,6 +463,7 @@ if needToMake "$ctOut" ; then
   step=$(echo "scale=8 ; 180 / $ark " | bc )
   execMe "ctas ct $ctOpt -k a -a $step ${ringOut}:/data:y -o ${ctOut}:/data"
 fi
+cleanUp "${ringOut}"
 
 if $beverbose ; then
   echo

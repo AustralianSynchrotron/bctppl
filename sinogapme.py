@@ -796,7 +796,8 @@ outData, outFile = getOutData(args.output, inData.shape)
 
 try :
 
-    for curSl in tqdm.tqdm(range(fsh[-2])):
+    pbar = tqdm.tqdm(total=fsh[-2]) if args.verbose else None
+    for curSl in range(fsh[-2]):
 
         gaps = []
         clmn=0
@@ -859,10 +860,25 @@ try :
             for gap in gaps :
                 leftMask[curSl,gap] = 0
         outData[:,curSl,:] = inSinogram.cpu().numpy()
+        if pbar is not None:
+            pbar.update(1)
 
-    leftMaskName = ".".join(args.output.split(".")[:-1])+"_mask.tif"
-    leftMask *= 255
-    tifffile.imwrite(leftMaskName, leftMask)
+    leftMask4fill = leftMask.copy()
+    leftMask4stitch = leftMask.copy()
+    for row in range(fsh[0]) :
+        if np.all(leftMask[row,:]==0) :
+            leftMask4fill[row,:] = 1
+            leftMask4stitch[row,:] = 0
+        else :
+            leftMask4fill[row,:] = leftMask[row,:]
+            leftMask4stitch[row,:] = 1
+    leftMask4fill *= 255
+    leftMask4stitch *= 255
+    #leftMask *= 255
+    leftMaskName = ".".join(args.output.split(".")[:-1])+"_mask"
+    tifffile.imwrite(leftMaskName + ".tif", leftMask4stitch)
+    if not np.all(leftMask4fill) :
+        tifffile.imwrite(leftMaskName + "_left.tif", leftMask4fill)
 
 
 except :
