@@ -31,6 +31,7 @@ printhelp() {
   echo "  -R INT       Width of ring artefact filter."
   echo "  -J           Correct jitter only in vertical axis."
   echo "  -K           Keep iterim files."
+  echo "  -P           Keep clean and steached projections container."
   echo "  -I           Use output folder instead of memory to store interim files."
 #  echo "  -i str       Type of gap fill algorithm: NO(default), NS, AT, AM"
 #  echo "  -t INT       Test mode: keeps intermediate images for the given projection."
@@ -64,11 +65,12 @@ jonly=false
 skipExisting=false
 beverbose=false
 cleanup=true
+keepClean=false
 inplace=false
 
 allargs=""
 #while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
-while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKJEhv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJEhv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -129,6 +131,7 @@ while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKJEhv" opt ; do
     J)  jonly=true;;
     E)  skipExisting=true;;
     K)  cleanup=false;;
+    P)  keepClean=true;;
     v)  beverbose=true;;
     h)  printhelp ; exit 1 ;;
     \?) echo "ERROR! Invalid option: -$OPTARG" >&2 ; exit 1 ;;
@@ -393,7 +396,7 @@ stitchOut="${iout}${pstage}_stitched.hdf"
 if needToMake "$stitchOut" ; then
   stitchOpt="$beverboseO"
   stitchOpt="$stitchOpt -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g ${shiftX},${shiftY} -c $centdiv"
-  stitchOpt="$stitchOpt -m ${fillOut}org_mask.tif "
+  stitchOpt="$stitchOpt -m ${fillOut}org_mask.tif -M ${fillOut}sft_mask.tif "
   execMe "imbl-shift.sh $stitchOpt ${fillOut}org.hdf:/data ${fillOut}sft.hdf:/data ${stitchOut}:/data"
 fi
 cleanUp "${fillOut}"
@@ -402,10 +405,15 @@ cleanUp "${fillOut}"
 # phase contrast
 bumpstage
 announceStage "inline phase contrast"
-ipcOut="$stitchOut"
+ipcOut="${out}${pstage}_ipc.hdf"
 if [ -z "$d2b" ] ; then # no IPC
   if $beverbose ; then
     echo "Skipping this stage because no delta to beta ratio provided (-i option)"
+  fi
+  if $keepClean  ||  ! $cleanup ; then
+    ln -s "$stitchOut" "$ipcOut"
+  else
+    mv "$stitchOut" "$ipcOut"
   fi
 else
   ipcOut="${out}${pstage}_ipc.hdf"
@@ -432,23 +440,31 @@ else
     fi
     execMe "ctas ipc $ipcOpt ${stitchOut}:/data -o ${ipcOut}:/data"
   fi
+  if ! $keepClean ; then
+    cleanUp "${stitchOut}"
+  fi
 fi
 
 
 # ring artefact removal
 bumpstage
 announceStage "ring artefact correction"
-ringOut="$ipcOut"
+ringOut="${out}${pstage}_ring.hdf"
 if [ -z "$ring" ] ; then # no ring removal
   if $beverbose ; then
     echo "Skipping this stage because no ring filter size provided (-R option)."
   fi
+  if $cleanup ; then
+    mv "$ipcOut" "$ringOut"
+  else
+    ln -s "$ipcOut" "$ringOut"
+  fi
 else
-  ringOut="${out}${pstage}_ring.hdf"
   if needToMake "$ringOut" ; then
     ringOpt="$beverboseO"
     execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y ${ipcOut}:/data:y"
   fi
+  cleanUp "${ipcOut}"
 fi
 
 
