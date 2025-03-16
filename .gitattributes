@@ -1,0 +1,4 @@
+models/model2/model_gen2.pt filter=lfs diff=lfs merge=lfs -text
+models/model2/model_gen4.pt filter=lfs diff=lfs merge=lfs -text
+models/model2/model_gen8.pt filter=lfs diff=lfs merge=lfs -text
+models/model2/model_gen16.pt filter=lfs diff=lfs merge=lfs -text
