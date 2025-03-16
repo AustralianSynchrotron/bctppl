@@ -247,7 +247,7 @@ def save_model(model, model_path):
 
 
 def load_model(model, model_path):
-    model.load_state_dict(torch.load(model_path, map_location=TCfg.device))
+    model.load_state_dict(torch.load(model_path, map_location=TCfg.device, weights_only=True))
     return model
 
 

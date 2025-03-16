@@ -39,10 +39,14 @@ args = parser.parse_args()
 
 
 device = torch.device('cuda:0')
+maxBatchSize = 0
 try:
     localCfgDict = dict()
     exec(open(os.path.join(myPath, ".local.cfg")).read(),localCfgDict)
-    device = torch.device(localCfgDict['torchdevice'])
+    if 'torchdevice' in localCfgDict :
+        device = torch.device(localCfgDict['torchdevice'])
+    if 'maxBatchSize' in localCfgDict :
+        maxBatchSize = localCfgDict['maxBatchSize']
 except KeyError:
     raise
 except:
@@ -180,7 +184,8 @@ def fillSinogram(sinogram) :
     sinoCutStep = gapW
     lastStart = sinoL - blockH
     nofBlocks, lastBlock = divmod(lastStart, sinoCutStep)
-    modelIn = torch.empty( ( nofBlocks + bool(lastBlock) , 1 , *ssh ), device=device )
+    totBlocks = nofBlocks + bool(lastBlock)
+    modelIn = torch.empty( ( totBlocks , 1 , *ssh ), device=device )
     for block in range(nofBlocks) :
         modelIn[ block, 0, ... ] = resizedSino[0 , 0, block * sinoCutStep : block * sinoCutStep + blockH , : ]
     if lastBlock :
@@ -192,9 +197,12 @@ def fillSinogram(sinogram) :
     modelIn = mytransforms(modelIn)
 
     modelIn[ -1, 0, ... ] = modelIn[ -1, 0, ... ].flip(dims=(-2,)) # to get rid of the deffect in the end
-    results = None
+    results = torch.zeros( ( totBlocks , 1 , *gapSh ), device=device )
+    batchSize = min(maxBatchSize, totBlocks) if maxBatchSize else totBlocks
     with torch.no_grad() :
-        results = generator.generatePatches(modelIn)
+        for batch in range(0, totBlocks, batchSize) :
+            results[ batch:batch+batchSize, ... ] = generator.generatePatches(modelIn[batch:batch+batchSize,...])
+        #results = generator.generatePatches(modelIn)
     results[ -1, 0, ... ] = results[ -1, 0, ... ].flip(dims=(-2,)) # to flip back
 
     if lastBlock :
