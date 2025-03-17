@@ -4,6 +4,9 @@ allOpts="$*"
 export EXEPATH="$(dirname "$(realpath "$0")" )"
 source "$EXEPATH/commonsource.sh"
 source "$EXEPATH/.local.cfg"
+export CUDA_VISIBLE_DEVICES
+clinfo -l
+exit 0
 
 printhelp() {
   echo "Usage: $0 [OPTIONS] <input hdf> <output dir>"
