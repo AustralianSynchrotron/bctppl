@@ -3,8 +3,11 @@
 allOpts="$*"
 export EXEPATH="$(dirname "$(realpath "$0")" )"
 source "$EXEPATH/commonsource.sh"
-source "$EXEPATH/.local.cfg"
-export CUDA_VISIBLE_DEVICES
+LOCALCFG="$EXEPATH/.local.cfg"
+if [ -e "$LOCALCFG" ] ; then
+  source "$LOCALCFG"
+  export CUDA_VISIBLE_DEVICES
+fi
 
 printhelp() {
   echo "Usage: $0 [OPTIONS] <input hdf> <output dir>"

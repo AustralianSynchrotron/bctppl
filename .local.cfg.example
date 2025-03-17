@@ -1,0 +1,4 @@
+# Example local configuration. Rename file to ".local.cfg" and uncomment, edit params.
+#CUDA_VISIBLE_DEVICES="GPU-4a863953-5573-a150-d9e9-0246c6e943c9"
+#torchdevice="cuda:0"
+#maxBatchSize=256 #384
