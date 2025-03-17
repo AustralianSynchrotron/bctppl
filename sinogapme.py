@@ -176,7 +176,7 @@ def fillSinogram(sinogram) :
     resizedSino[ ... , : 2*gapW ] = torch.nn.functional.interpolate(
         sinogram[ ... , : 2*blockW ], size=( sinoL , 2*gapW ), mode='bilinear')
     resizedSino[ ... , 2*gapW : 3*gapW ] = torch.nn.functional.interpolate(
-        sinogram[ ... , : 2*blockW : 3*blockW ], size=( sinoL , gapW ), mode='bilinear')
+        sinogram[ ... , 2*blockW : 3*blockW ], size=( sinoL , gapW ), mode='bilinear')
     resizedSino[ ... , 3*gapW:] = torch.nn.functional.interpolate(
         sinogram[ ... , 3*blockW : ], size=( sinoL , 2*gapW ), mode='bilinear')
 
