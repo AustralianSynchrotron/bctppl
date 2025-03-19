@@ -104,16 +104,22 @@ def addToHDF(filename, containername, data) :
 
 
 def getInData(inputString):
-    sampleHDF = inputString.split(':')
-    if len(sampleHDF) != 2 :
+    nameSplit = inputString.split(':')
+    if len(nameSplit) == 1 : # tiff image
+        data = loadImage(nameSplit[0])
+        data = np.expand_dims(data, 1)
+        return data
+    if len(nameSplit) != 2 :
         raise Exception(f"String \"{inputString}\" does not represent an HDF5 format \"fileName:container\".")
+    hdfName = nameSplit[0]
+    hdfVolume = nameSplit[1]
     try :
-        trgH5F =  h5py.File(sampleHDF[0],'r')
+        trgH5F =  h5py.File(hdfName,'r')
     except :
-        raise Exception(f"Failed to open HDF file '{sampleHDF[0]}'.")
-    if  sampleHDF[1] not in trgH5F.keys():
-        raise Exception(f"No dataset '{sampleHDF[1]}' in input file {sampleHDF[0]}.")
-    data = trgH5F[sampleHDF[1]]
+        raise Exception(f"Failed to open HDF file '{hdfName}'.")
+    if  hdfVolume not in trgH5F.keys():
+        raise Exception(f"No dataset '{hdfVolume}' in input file {hdfName}.")
+    data = trgH5F[hdfVolume]
     if not data.size :
         raise Exception(f"Container \"{inputString}\" is zero size.")
     sh = data.shape
@@ -144,6 +150,52 @@ def getOutData(outputString, shape) :
         if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
             raise Exception(f"Shape mismatch: input {shape}, file {dset.shape}.")
     return dset, trgH5F
+
+
+class OutputWrapper:
+
+    def __init__(self, outputString, shape):
+        if len(shape) != 3 :
+            raise Exception(f"Not appropriate output array size {shape}.")
+        nameSplit = outputString.split(':')
+        self.trgH5F = None
+        if len(nameSplit) == 1 : # tiff image
+            if shape[1] != 1 :
+                raise Exception(f"Cannot save 3D data {shape} from input to a tiff file.")
+            self.TiffName = nameSplit[0]
+            return
+        self.TiffName = None
+        if len(nameSplit) != 2 :
+            raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
+        hdfName = nameSplit[0]
+        hdfVolume = nameSplit[1]
+        try :
+            self.trgH5F =  h5py.File(hdfName,'w')
+        except :
+            raise Exception(f"Failed to open HDF file '{hdfName}'.")
+        if  hdfVolume not in self.trgH5F.keys():
+            self.dset = self.trgH5F.create_dataset(hdfVolume, shape, dtype='f')
+        else :
+            self.dset = self.trgH5F[hdfVolume]
+            csh = self.dset.shape
+            if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
+                raise Exception(f"Shape mismatch: input {shape}, output HDF {self.dset.shape}.")
+
+    def __del__(self):
+        if self.trgH5F is not None :
+            self.trgH5F.close()
+
+    def put(self, data, slice):
+        if len(data.shape) != 2 :
+            raise Exception(f"Output accepts 2D data. Got shape {data.shape} instead.")
+        if self.TiffName is not None :
+            tifffile.imwrite(self.TiffName, data)
+            if slice != 0 :
+                Warning(f"Output is a tiff file, but non-zero slice {slice} is saved.")
+        elif self.trgH5F is not None :
+            self.dset[:,slice,:] = data
+        else :
+            raise Exception(f"Output is not defined. Should never happen.")
 
 #%% MODELS
 
@@ -207,13 +259,16 @@ def fillSinogram(sinogram) :
 
     if lastBlock :
         newLast = torch.zeros(gapSh, device=device)
-        newLast[lastBlock:,:] = results[-1,0,lastBlock:,:]
+        tail = sinoCutStep - lastBlock
+        newLast[:-tail,:] = results[-1,0,tail:,:]
         results[-1,0,...] = newLast
     preBlocks = torch.zeros((4,1,*gapSh), device=device)
     pstBlocks = torch.zeros((4,1,*gapSh), device=device)
     for curs in range(4) :
-        preBlocks[ -curs-1 , 0 , sinoCutStep*(curs+1) :  , : ] = results[ 0 , 0 , : -sinoCutStep*(curs+1) , : ]
-        pstBlocks[ curs , 0 , : (-sinoCutStep*curs) if curs else (blockH+1) , : ] = results[ -1 , 0 , sinoCutStep*curs : , : ]
+        preBlocks[ -curs-1 , 0 , sinoCutStep*(curs+1) :  , : ] \
+            = results[ 0 , 0 , : -sinoCutStep*(curs+1) , : ]
+        pstBlocks[ curs , 0 , : (-sinoCutStep*curs) if curs else (blockH+1) , : ] \
+            = results[ -1 , 0 , sinoCutStep*curs : , : ]
     resultsPatched = torch.cat( (preBlocks, results, pstBlocks), dim=0 )
 
     blockCut = blockH / 5
@@ -247,105 +302,100 @@ def fillSinogram(sinogram) :
 
 inData = getInData(args.input)
 fsh = inData.shape[1:]
-mask = loadImage(args.mask, fsh)
+mask = loadImage(args.mask, fsh) if len(args.mask) else None
 leftMask = np.ones(fsh, dtype=np.uint8)
-outData, outFile = getOutData(args.output, inData.shape)
+outWrapper = OutputWrapper(args.output, inData.shape)
 
 
-try :
+pbar = tqdm.tqdm(total=fsh[-2]) if args.verbose else None
+for curSl in range(fsh[-2]):
 
-    pbar = tqdm.tqdm(total=fsh[-2]) if args.verbose else None
-    for curSl in range(fsh[-2]):
+    inSinogram = torch.tensor(inData[:,curSl,:], device=model.TCfg.device)
+    sinoMask =  torch.where( inSinogram.sum(dim=0) == 0 , 0, 1 ) if mask is None else mask[curSl,:]
 
-        gaps = []
-        clmn=0
-        gapStart=-1
-        while clmn < fsh[-1] :
-            value = mask[curSl,clmn]
-            if ( value < 1 and gapStart >= 0 ) or \
-               ( value >= 1 and gapStart < 0 ) :
-                   clmn +=1
-                   continue
-            if value < 1 :
-                if gapStart < 0  : # start the gap
-                    gapStart = clmn
-            else :
-                if gapStart >= 0  : # end the gap
-                    gaps.append(np.s_[gapStart:clmn])
-                    gapStart = -1
-            clmn += 1
-        if gapStart >= 0:
-            gaps.append(np.s_[gapStart:fsh[-1]])
-
-        inSinogram = torch.tensor(inData[:,curSl,:], device=model.TCfg.device)
-
-        def closeGapsFromList(gapsIn) :
-            gapsToRet = []
-            for gapI, gap in enumerate(gapsIn) :
-                gapW = gap.stop-gap.start
-                prevGap = gapsToRet[-1].stop if len(gapsToRet) else 0
-                nextGap = gapsIn[gapI+1].start if gapI < len(gapsIn)-1 else fsh[-1]
-                if  gapW <= 32 \
-                and gap.start - prevGap > 2*gapW \
-                and nextGap - gap.stop > 2*gapW :
-                    stripe=np.s_[ gap.start - 2*gapW : gap.stop + 2*gapW]
-                    stripeData = inSinogram[:,stripe]
-                    filledData = fillSinogram(stripeData).squeeze()
-                    inSinogram[:,stripe] = filledData
-                else :
-                    #print(f"Warning. Gap {gap} does not have enough space"
-                    #      f" between adjacent gaps {np.s_[prevGap,nextGap]} to process. "
-                    #      f" will try in the next iteration.")
-                    gapsToRet.append(gap)
-            return gapsToRet
-
-        while True :
-            gapsOnEnter = len(gaps)
-            gaps = closeGapsFromList(gaps)
-            if not len(gaps) or len(gaps) == gapsOnEnter :
-                break
-        curGap = 0
-        while curGap < len(gaps)-1 : # try to combine gaps
-            combGaps = [ np.s_[ gaps[curGap].start : gaps[curGap+1].stop ], ]
-            gapLeft = len(closeGapsFromList(combGaps))
-            if gapLeft :
-                curGap += 1
-            else :
-                gaps = [ *gaps[:curGap], *gaps[curGap+2:] ]
-        gaps = closeGapsFromList(gaps) # last attempt. needed at all?
-
-        if len(gaps) :
-            for gap in gaps :
-                leftMask[curSl,gap] = 0
-        outData[:,curSl,:] = inSinogram.cpu().numpy()
-        if pbar is not None:
-            pbar.update(1)
-
-    leftMask4fill = leftMask.copy()
-    leftMask4stitch = leftMask.copy()
-    for row in range(fsh[0]) :
-        if np.all(leftMask[row,:]==0) :
-            leftMask4fill[row,:] = 1
-            leftMask4stitch[row,:] = 0
+    gaps = []
+    clmn=0
+    gapStart=-1
+    while clmn < fsh[-1] :
+        value = sinoMask[clmn]
+        if ( value < 1 and gapStart >= 0 ) or \
+           ( value >= 1 and gapStart < 0 ) :
+               clmn +=1
+               continue
+        if value < 1 :
+            if gapStart < 0  : # start the gap
+                gapStart = clmn
         else :
-            leftMask4fill[row,:] = leftMask[row,:]
-            leftMask4stitch[row,:] = 1
-    leftMask4fill *= 255
-    leftMask4stitch *= 255
-    #leftMask *= 255
-    leftMaskName = ".".join(args.output.split(".")[:-1])+"_mask"
-    tifffile.imwrite(leftMaskName + ".tif", leftMask4stitch)
-    if not np.all(leftMask4fill) :
-        tifffile.imwrite(leftMaskName + "_left.tif", leftMask4fill)
+            if gapStart >= 0  : # end the gap
+                gaps.append(np.s_[gapStart:clmn])
+                gapStart = -1
+        clmn += 1
+    if gapStart >= 0:
+        gaps.append(np.s_[gapStart:fsh[-1]])
+
+    def closeGapsFromList(gapsIn) :
+        gapsToRet = []
+        for gapI, gap in enumerate(gapsIn) :
+            gapW = gap.stop-gap.start
+            prevGap = gapsToRet[-1].stop if len(gapsToRet) else 0
+            nextGap = gapsIn[gapI+1].start if gapI < len(gapsIn)-1 else fsh[-1]
+            if  gapW <= 32 \
+            and gap.start - prevGap > 2*gapW \
+            and nextGap - gap.stop > 2*gapW :
+                stripe=np.s_[ gap.start - 2*gapW : gap.stop + 2*gapW]
+                stripeData = inSinogram[:,stripe]
+                filledData = fillSinogram(stripeData).squeeze()
+                inSinogram[:,stripe] = filledData
+            else :
+                #print(f"Warning. Gap {gap} does not have enough space"
+                #      f" between adjacent gaps {np.s_[prevGap,nextGap]} to process. "
+                #      f" will try in the next iteration.")
+                gapsToRet.append(gap)
+        return gapsToRet
+
+    while True :
+        gapsOnEnter = len(gaps)
+        gaps = closeGapsFromList(gaps)
+        if not len(gaps) or len(gaps) == gapsOnEnter :
+            break
+    curGap = 0
+    while curGap < len(gaps)-1 : # try to combine gaps
+        combGaps = [ np.s_[ gaps[curGap].start : gaps[curGap+1].stop ], ]
+        gapLeft = len(closeGapsFromList(combGaps))
+        if gapLeft :
+            curGap += 1
+        else :
+            gaps = [ *gaps[:curGap], *gaps[curGap+2:] ]
+    gaps = closeGapsFromList(gaps) # last attempt. needed at all?
+
+    if len(gaps) :
+        for gap in gaps :
+            leftMask[curSl,gap] = 0
+    outWrapper.put(inSinogram.cpu().numpy(), curSl)
     if pbar is not None:
-        pbar.update(2)
+        pbar.update(1)
 
 
-except :
-    outFile.close()
-    raise
-outFile.close()
-print("Done")
+leftMask4fill = leftMask.copy()
+leftMask4stitch = leftMask.copy()
+for row in range(fsh[0]) :
+    if np.all(leftMask[row,:]==0) :
+        leftMask4fill[row,:] = 1
+        leftMask4stitch[row,:] = 0
+    else :
+        leftMask4fill[row,:] = leftMask[row,:]
+        leftMask4stitch[row,:] = 1
+leftMask4fill *= 255
+leftMask4stitch *= 255
+#leftMask *= 255
+leftMaskName = ".".join(args.output.split(".")[:-1])+"_mask"
+tifffile.imwrite(leftMaskName + ".tif", leftMask4stitch)
+if not np.all(leftMask4fill) :
+    tifffile.imwrite(leftMaskName + "_left.tif", leftMask4fill)
+
+if pbar is not None:
+    pbar.close()
+    print("Done")
 
 
 
