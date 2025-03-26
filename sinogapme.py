@@ -125,7 +125,13 @@ def getInData(inputString):
     sh = data.shape
     if len(sh) != 3 :
         raise Exception(f"Dimensions of the container \"{inputString}\" is not 3: {sh}.")
-    return data
+    dataN = np.empty(data.shape, dtype=np.float32)
+    if args.verbose :
+        print("Reading input ... ", end="", flush=True)
+    data.read_direct(dataN)
+    if args.verbose :
+        print("Done.")
+    return dataN
 
 
 def getOutData(outputString, shape) :
