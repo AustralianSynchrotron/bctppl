@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from models.model2 import loadMe as model
+from models.model3 import loadMe as model
 
 #import sys
 import os
