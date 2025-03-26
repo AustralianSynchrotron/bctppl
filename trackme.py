@@ -396,6 +396,10 @@ def removeBorders(img, mask) :
     ms = mask[...,idx]
     cleaLine(ln, ms, True)
     cleaLine(ln, ms, False)
+  # apply BCT mask: the ball should never be there
+  mask[:2*ksh[0],:] = 0
+  mask[:,:2*ksh[1]] = 0
+  mask[:,-2*ksh[1]:] = 0
 
 
 # I can move removeNorders to GPU and use it instead of Pool multiprocessing.
@@ -433,9 +437,10 @@ def trackIt() :
         dataPad = dataPad.to(device)
         dataPad = normalizeWithMask(dataPad, maskPad)
         dataCorr = fn.conv2d(dataPad, kernel) / maskCount
+        psh = dataCorr.shape
         dataNP = dataCorr.cpu().numpy()
         dataInPool = [ dataNP[cursl,0,...] for cursl in range(nofR) ]
-        with Pool() as p:
+        with Pool() as p: # CPU load
             resultsR = np.array(p.map(getPosInPool, dataInPool))
             results = np.concatenate((results,resultsR),axis=0)
         del dataPad
