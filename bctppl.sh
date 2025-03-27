@@ -9,8 +9,11 @@ if [ -e "$LOCALCFG" ] ; then
   export CUDA_VISIBLE_DEVICES
 fi
 
+
+# Parse input arguments
+
 printhelp() {
-  echo "Usage: $0 [OPTIONS] <input hdf> <output dir>"
+  echo "Usage: $0 [OPTIONS] <input hdf or data directory> <output dir>"
   echo "  BCT processing pipeline."
   echo "OPTIONS:"
   echo "  -b PATH      Background image in original position."
@@ -19,7 +22,7 @@ printhelp() {
   echo "  -D PATH      Dark field image in shifted position."
   echo "  -m PATH      Image containing map of pixels to fill."
 #  echo "  -M PATH      Image to process same as input."
-  echo "  -a INT       Number of steps to cover 180deg ark."
+  echo "  -a INT       Number of steps to cover 180deg ark or *PPSstream.txt file to estimate it."
   echo "  -f INT       First frame in original data set."
   echo "  -F INT       First frame in shifted data set."
   echo "  -e INT       Number of projections to process. Ark+1 if not given."
@@ -71,6 +74,7 @@ cleanup=true
 keepClean=false
 inplace=false
 fromStage=0
+#forcedInp=""
 
 allargs=""
 #while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
@@ -78,8 +82,8 @@ while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJS:Ehv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
-        chkint "$ark" "-$opt"
-        chkpos "$ark" "-$opt"
+        #chkint "$ark" "-$opt"
+        #chkpos "$ark" "-$opt"
         ;;
     b)  bgO="$bgO $OPTARG";;
     B)  bgS="$bgS $OPTARG";;
@@ -148,17 +152,122 @@ done
 shift $((OPTIND-1))
 
 
+# Check and modify inputs
+
+# Deal with input path
 if [ -z "${1}" ] ; then
   echo "No input path was given." >&2
   printhelp >&2
   exit 1
 fi
-chkhdf "$1"
-inp="$1"
+addHDFpath() {
+  outLine=""
+  for file in $1 ; do
+    outLine="$outLine ${file}:${2}"
+  done
+  echo "$outLine"
+}
+if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
+
+  hdfEntry="/entry/data/data"
+  # sample
+  listOfFiles="$(find -L "$1" -maxdepth 1 -iname 'SAMPLE*hdf')"
+  nofSamples=$(grep "hdf" -c <<< "$listOfFiles")
+  if (( ! nofSamples )) ; then
+    echo "No sample file(s) found in ${1}." >&2
+    exit 1
+  fi
+  if (( nofSamples > 1 )) ; then
+    echo "Error! More than a single sample file found in ${1}:" >&2
+    echo "$listOfFiles" >&2
+    exit 1
+  fi
+  inp="${listOfFiles}:${hdfEntry}"
+  if $beverbose ; then
+    echo "Sample file found: $listOfFiles"
+  fi
+  # BG org
+  if [ -z "$bgO" ] ; then
+    listOfFiles="$(find -L "$1" -maxdepth 1 -iname  '*BG*org*hdf')"
+    if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
+      bgO="$(addHDFpath "$listOfFiles" "$hdfEntry")"
+    fi
+    if $beverbose ; then
+      echo "Backgrounds in original position found:" $listOfFiles
+    fi
+  fi
+  # BG sft
+  if [ -z "$bgS" ] ; then
+    listOfFiles="$(find -L "$1" -maxdepth 1 -iname  '*BG*sft*hdf')"
+    if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
+      bgS="$(addHDFpath "$listOfFiles" "$hdfEntry")"
+    fi
+    if $beverbose ; then
+      echo "Backgrounds in shifted position found:" $listOfFiles
+    fi
+  fi
+  # non-specific DF
+  dfC=""
+  if [ -z "$dfO" ] || [ -z "$dfS" ] ; then # try non-specific DFs
+    listOfFiles="$(find -L "$1" -maxdepth 1 -iname  '*DF*hdf')"
+    if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
+      dfC="$(addHDFpath "$listOfFiles" "$hdfEntry")"
+    fi
+    if $beverbose ; then
+      echo "All dark fields found:" $listOfFiles
+    fi
+  fi
+  # DF org
+  if [ -z "$dfO" ] ; then
+    listOfFiles="$(find -L "$1" -maxdepth 1 -iname  '*DF*org*hdf')"
+    if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
+      dfO="$(addHDFpath "$listOfFiles" "$hdfEntry")"
+    elif [ -n "$dfC" ] ; then
+      dfO="$dfC"
+    fi
+    if $beverbose ; then
+      echo "Dark fields in original position found:" $listOfFiles
+    fi
+  fi
+  # DF sft
+  if [ -z "$dfS" ] ; then
+    listOfFiles="$(find -L "$1" -maxdepth 1 -iname  '*DF*sft*hdf')"
+    if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
+      dfS="$(addHDFpath "$listOfFiles" "$hdfEntry")"
+    elif [ -n "$dfC" ] ; then
+      dfS="$dfC"
+    fi
+    if $beverbose ; then
+      echo "Dark fields in shifted position found:" $listOfFiles
+    fi
+  fi
+  # PPS stream
+  if [ -z "$ark" ] ; then
+    listOfFiles="$(find -L "$1" -maxdepth 1 -iname  '*PPSstream.txt')"
+    if (( $(grep "txt" -c <<< "$listOfFiles") > 1 )) ; then
+      echo "Error! More than a single stream file found:" >&2
+      echo "$listOfFiles" >&2
+      echo "Choose one of them and use with -a option." >&2
+      exit 1
+    fi
+    if $beverbose ; then
+      echo "Stream data found: $listOfFiles"
+    fi
+    ark="$listOfFiles"
+  fi
+
+else
+  inp="$1"
+fi
+chkhdf "$inp"
+
+
+# Prepare output and log
 
 out=""
 if [ -n "${2}" ] ; then
   out="${2}/"
+  mkdir -p "${out}"
 else
   out="./"
 fi
@@ -172,12 +281,14 @@ else
   fi
   mkdir -p "$iout"
 fi
-
 LOGFILE="${out}.ppl.log"
 EXECRES="${out}.res"
-echo "" >> "$LOGFILE"
+touch "$LOGFILE"
 echo "# In \"$PWD\"" >> "$LOGFILE"
 echo "# $(realpath "$0") $allOpts " >> "$LOGFILE"
+
+
+# Check the rest of input arguments
 
 if [ -z "$firstS" ] ; then
   echo "No first frame in shifted data was given (-F)." >&2
@@ -186,10 +297,24 @@ if [ -z "$firstS" ] ; then
 fi
 
 if [ -z "$ark" ] ; then
-  echo "No 180-deg ark was given (-a option)." >&2
+  echo "Neither 180-deg ark provided (-a option), nor PPS stream file found." >&2
   printhelp >&2
   exit 1
 fi
+if ! [ "$ark" -eq "$ark" ] 2>/dev/null ; then # not an integer: stream file assumed
+  # try to derive it from stram.txt
+  streamFile="$ark"
+  #cleanStream="00_stream.dat"
+  #sedFiler='s:.*FrameNumber=\"\([^\"]*\)\".*Angle=\"\([^\"]*\)\".*:\1 \2:g'
+  #cat "$streamFile" | sed "$sedFiler"  > "$cleanStream"
+  ark=$("$EXEPATH/analyzeStream.py" "$streamFile")
+  chkint "$ark" "$streamFile"
+  if $beverbose ; then
+    echo "Found 180-deg ark: $ark"
+  fi
+fi
+chkpos "$ark" "-a"
+
 if [ -z "$end" ] ; then
   end=$(( ark + 1 ))
 fi
@@ -205,6 +330,7 @@ if $beverbose ; then
 fi
 
 
+# Some functions to be used below
 
 addOpt() {
   if [ -n "$2" ] ; then
@@ -276,23 +402,37 @@ cleanUp() {
 }
 
 
+# Actual p[rocessing starts from here
 
-# create output dir
+# prepare averaged BG's
 bumpstage
 bgOu="${out}${pstage}_bg_org.tif"
 bgSu="${out}${pstage}_bg_sft.tif"
 dfOu="${out}${pstage}_df_org.tif"
 dfSu="${out}${pstage}_df_sft.tif"
+createMask=false
+if [ -z "$gmask" ] ; then
+  createMask=true
+  gmask="${out}${pstage}_mask.tif"
+fi
 if (( stage >= fromStage )) ; then
   announceStage "preparing"
-  if [ -n "${out}" ] ; then
-    execMe "mkdir -p ${out}"
-  fi
   averageHdf2Tif "$bgO" "$bgOu"
   averageHdf2Tif "$bgS" "$bgSu"
   averageHdf2Tif "$dfO" "$dfOu"
   averageHdf2Tif "$dfS" "$dfSu"
+  if $createMask ; then
+    if $beverbose ; then
+      echo "No mask provided (-m option)."
+      echo "Creating mask from background image \"$bgOu\" and save to \"$gmask\"."
+    fi
+    premask="${out}.premask.tif"
+    execMe "ctas v2v $bgOu -i 8 -m 65534 -M 65535 -o $premask"
+    execMe "convert $premask -morphology dilate square -negate ${gmask}"
+    rm "$premask"
+  fi
 fi
+
 
 
 # split into org and sft
@@ -311,11 +451,11 @@ if (( stage >= fromStage )) ; then
       splitOpt="$splitOpt -D $dfOu "
     fi
     splitOpt="$splitOpt $( addOpt -m "$gmask -M $gmask" ) "
-    splitOpt="$splitOpt $( addOpt -c $cropStr ) "
-    splitOpt="$splitOpt $( addOpt -r $rotate ) "
-    splitOpt="$splitOpt $( addOpt -z $binn ) "
-    splitOpt="$splitOpt $( addOpt -Z $zinn ) "
-    splitOpt="$splitOpt $( addOpt -i $fill ) "
+    splitOpt="$splitOpt $( addOpt -c "$cropStr" ) "
+    splitOpt="$splitOpt $( addOpt -r "$rotate" ) "
+    splitOpt="$splitOpt $( addOpt -z "$binn" ) "
+    splitOpt="$splitOpt $( addOpt -Z "$zinn" ) "
+    splitOpt="$splitOpt $( addOpt -i "$fill" ) "
     execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $inp $splitOut "
   fi
 fi
@@ -346,15 +486,15 @@ fi
 splitWidth=$( h5ls -rf "${splitOut}org.hdf" | grep "/data" | sed "s:.* \([0-9]*\)}:\1:g" )
 ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth ${trackOut}*.dat > $EXECRES"
-read amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
+read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
 if $beverbose ; then
   echo "Jitter amplitudes: $amplX $amplY"
   echo "Shift: $shiftX $shiftY"
   echo "Rotation centre deviation: $centdiv"
-  echo "True ark (for indication only): $trueArk"
+  echo "True 180-deg ark (for indication only): $trueArk"
 fi
-shiftX=$( printf "%.0f" $shiftX ) # rounding
-shiftY=$( printf "%.0f" $shiftY ) # rounding
+shiftX=$( printf "%.0f" "$shiftX" ) # rounding
+shiftY=$( printf "%.0f" "$shiftY" ) # rounding
 
 
 # align
@@ -498,8 +638,8 @@ if (( stage >= fromStage )) ; then
   announceStage "CT reconstruction"
   if needToMake "$ctOut" ; then
     ctOpt="$beverboseO"
-    ctOpt="$ctOpt $( addOpt -r $pix ) "
-    ctOpt="$ctOpt $( addOpt -w $wav ) "
+    ctOpt="$ctOpt $( addOpt -r "$pix" ) "
+    ctOpt="$ctOpt $( addOpt -w "$wav" ) "
     step=$(echo "scale=8 ; 180 / $ark " | bc )
     execMe "ctas ct $ctOpt -k a -a $step ${ringOut}:/data:y -o ${ctOut}:/data"
   fi
