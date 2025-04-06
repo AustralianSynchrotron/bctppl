@@ -42,7 +42,8 @@ printhelp() {
   echo "  -I           Use output folder instead of memory to store interim files."
 #  echo "  -i str       Type of gap fill algorithm: NO(default), NS, AT, AM"
 #  echo "  -t INT       Test mode: keeps intermediate images for the given projection."
-  echo "  -S INT       Start fromgiven stage."
+  echo "  -S INT       Start from given stage."
+  echo "  -T INT       Terminate after given stage."
   echo "  -E           Skip stages which have their results already present."
   echo "  -v           Be verbose to show progress."
   echo "  -h           Prints this help."
@@ -74,11 +75,12 @@ cleanup=true
 keepClean=false
 inplace=false
 fromStage=0
+termStage=9999
 #forcedInp=""
 
 allargs=""
 #while getopts "b:B:d:D:m:M:a:f:F:e:c:r:z:Z:i:t:hv" opt ; do
-while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJS:Ehv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -139,6 +141,10 @@ while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJS:Ehv" opt ; do
     S)  fromStage=$OPTARG
         chkint "$fromStage" "-$opt"
         chkpos "$fromStage" "-$opt"
+        ;;
+    T)  termStage=$OPTARG
+        chkint "$termStage" "-$opt"
+        chkpos "$termStage" "-$opt"
         ;;
     E)  skipExisting=true;;
     K)  cleanup=false;;
@@ -341,6 +347,10 @@ addOpt() {
 stage=0
 pstage=""
 bumpstage() {
+  if (( stage > termStage )) ; then
+    echo "Terminated at stage $stage." >&2
+    exit 0
+  fi
   stage=$(( stage + 1 ))
   pstage="$( printf '%02i' $stage )"
   return $(( stage >= fromStage ))

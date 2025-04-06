@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-from models.model3 import loadMe as model
-
 #import sys
 import os
 #import random
@@ -33,9 +31,22 @@ parser.add_argument('output', type=str, default="",
                     help='Output filled stack.')
 parser.add_argument('-m', '--mask', type=str, default="",
                     help='Mask of the input stack.')
+parser.add_argument('-M', '--model', type=str, default="",
+                    help='Mask of the input stack.')
 parser.add_argument('-v', '--verbose', action='store_true', default=False,
                     help='Plot results.')
 args = parser.parse_args()
+
+if args.model in ["", "default", "3", "mse"] :
+    from models.model2 import loadMe as model
+elif args.model in ["2", "adv"] :
+    from models.model3 import loadMe as model
+else :
+    raise Exception(f"Unknown model \"{args.model}\" given via -M/--model option.", )
+
+
+
+
 
 
 device = torch.device('cuda:0')

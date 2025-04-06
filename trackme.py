@@ -210,7 +210,7 @@ maskPad = torch.zeros( (1, 1, dsh[-2] + 2*ksh[-2] - 2, dsh[-1] + 2*ksh[-1] - 2 )
 maskPad[..., ksh[-2]-1 : -ksh[-2]+1, ksh[-1]-1 : -ksh[-1]+1 ] = torch.from_numpy(maskImage).unsqueeze(0).unsqueeze(0)
 maskPad = maskPad.to(device)
 maskCount = fn.conv2d(maskPad, torch.ones_like(kernel, device=device))
-maskCount = torch.where(maskCount>1, maskCount, 1)
+maskCount = torch.where(maskCount>0, 1/maskCount, 0)
 maskBall = fn.conv2d(maskPad, kernelBin)
 minArea = math.prod(ksh) // 56
 maskCorr = torch.where( maskBall > minArea, 1, 0).squeeze().cpu().numpy()
@@ -436,7 +436,7 @@ def trackIt() :
             torch.from_numpy(dataN[fRange,...]).unsqueeze(1)
         dataPad = dataPad.to(device)
         dataPad = normalizeWithMask(dataPad, maskPad)
-        dataCorr = fn.conv2d(dataPad, kernel) / maskCount
+        dataCorr = fn.conv2d(dataPad, kernel) * maskCount
         psh = dataCorr.shape
         dataNP = dataCorr.cpu().numpy()
         dataInPool = [ dataNP[cursl,0,...] for cursl in range(nofR) ]
