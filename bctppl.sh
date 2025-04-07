@@ -471,6 +471,7 @@ if (( stage >= fromStage )) ; then
     splitOpt="$splitOpt $( addOpt -Z "$zinn" ) "
     splitOpt="$splitOpt $( addOpt -i "$fill" ) "
     execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $inp $splitOut "
+    cp  "${splitOut}mask.tif" .split_shape.tif
   fi
 fi
 
@@ -497,7 +498,8 @@ if (( stage >= fromStage )) ; then
   # analyze track results
   announceStage 3 "analyzing jitter tracking"
 fi
-splitWidth=$( h5ls -rf "${splitOut}org.hdf" | grep "/data" | sed "s:.* \([0-9]*\)}:\1:g" )
+#splitWidth=$( h5ls -rf "${splitOut}org.hdf" | grep "/data" | sed "s:.* \([0-9]*\)}:\1:g" )
+splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth ${trackOut}*.dat > $EXECRES"
 read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
