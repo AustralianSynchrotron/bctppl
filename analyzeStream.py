@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import pandas as pd
 import numpy as np
 import sys
 import re
@@ -10,7 +9,6 @@ if len(sys.argv) < 2 :
     print("Error! No input stream provided.", file=sys.stderr)
     exit(1)
 
-#data = pd.read_csv(sys.argv[1], sep=' ', comment='#', header=None).to_numpy()
 
 data = []
 badline=None
