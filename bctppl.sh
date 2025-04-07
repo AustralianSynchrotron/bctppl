@@ -320,6 +320,10 @@ if ! [ "$ark" -eq "$ark" ] 2>/dev/null ; then # not an integer: stream file assu
   fi
 fi
 chkpos "$ark" "-a"
+if (( firstO + ark > firstS )) ; then
+  echo "Error! First frame in shifted data set $firstS is less than the last frame in original data set $(( firstO + ark ))" >&2
+  exit 1
+fi
 
 if [ -z "$end" ] ; then
   end=$(( ark + 1 ))
