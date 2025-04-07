@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import pandas as pd
 import numpy as np
 import sys
 import re
@@ -9,6 +10,7 @@ if len(sys.argv) < 2 :
     print("Error! No input stream provided.", file=sys.stderr)
     exit(1)
 
+#data = pd.read_csv(sys.argv[1], sep=' ', comment='#', header=None).to_numpy()
 
 data = []
 badline=None
@@ -25,9 +27,7 @@ if badline :
     print(f"Warning! Failed to parse line(s) from PPS stream; f.e.: \"{badline}\".")
 data = np.array(data)
 
-firstFrame=None
-lastFrame=None
-firstFrame = np.where(data[:,0] == 1)[0][0] - 1
+firstFrame = np.where( np.logical_and (data[:,0] != data[0,0], data[:,0]>0) )[0][0] - 1
 lastFrame = np.where(data[:,0] == data[-1,0])[0][0] + 1
 data = data[firstFrame:lastFrame,:]
 points = data.shape[0]
