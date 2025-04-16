@@ -22,6 +22,7 @@ import argparse
 import tqdm
 from scipy.optimize import curve_fit
 from multiprocessing import Pool
+import commonsource as cs
 
 myPath = os.path.dirname(os.path.realpath(__file__))
 
@@ -51,160 +52,21 @@ except:
 
 
 
-def loadImage(imageName, expectedShape=None) :
-    if not imageName:
-        return None
-    #imdata = imread(imageName).astype(np.float32)
-    imdata = tifffile.imread(imageName).astype(np.float32)
-    if len(imdata.shape) == 3 :
-        imdata = np.mean(imdata[:,:,0:3], 2)
-    if not expectedShape is None  and  imdata.shape != expectedShape :
-        raise Exception(f"Dimensions of the input image \"{imageName}\" {imdata.shape} "
-                        f"do not match expected shape {expectedShape}.")
-    return imdata
-
-
-def plotData(dataY, rangeY=None, dataYR=None, rangeYR=None,
-             dataX=None, rangeX=None, rangeP=None,
-             figsize=(16,8), saveTo=None, show=True):
-
-    if type(dataY) is np.ndarray :
-        plotData((dataY,), rangeY=rangeY, dataYR=dataYR, rangeYR=rangeYR,
-             dataX=dataX, rangeX=rangeX, rangeP=rangeP,
-             figsize=figsize, saveTo=saveTo, show=show)
-        return
-    if type(dataYR) is np.ndarray :
-        plotData(dataY, rangeY=rangeY, dataYR=(dataYR,), rangeYR=rangeYR,
-             dataX=dataX, rangeX=rangeX, rangeP=rangeP,
-             figsize=figsize, saveTo=saveTo, show=show)
-        return
-    if type(dataY) is not tuple and type(dataY) is not list:
-        raise Exception(f"Unknown data type to plot: {type(dataY)}.")
-    if type(dataYR) is not tuple and dataYR is not None:
-        raise Exception(f"Unknown data type to plot: {type(dataYR)}.")
-
-    last = min( len(data) for data in dataY )
-    if dataYR is not None:
-        last = min( last,  min( len(data) for data in dataYR ) )
-    if dataX is not None:
-        last = min(last, len(dataX))
-    if rangeP is None :
-        rangeP = (0,last)
-    elif type(rangeP) is int :
-        rangeP = (0,rangeP) if rangeP > 0 else (-rangeP,last)
-    elif type(rangeP) is tuple :
-        rangeP = ( 0    if rangeP[0] is None else rangeP[0],
-                   last if rangeP[1] is None else rangeP[1],)
-    else :
-        raise Exception(f"Bad data type on plotData input rangeP: {type(rangeP)}")
-    rangeP = np.s_[ max(0, rangeP[0]) : min(last, rangeP[1]) ]
-    if dataX is None :
-        dataX = np.arange(rangeP.start, rangeP.stop)
-
-    plt.style.use('default')
-    plt.style.use('dark_background')
-    fig, ax1 = plt.subplots(figsize=figsize)
-    ax1.xaxis.grid(True, 'both', linestyle='dotted')
-    if rangeX is not None :
-        ax1.set_xlim(rangeX)
-    else :
-        ax1.set_xlim(rangeP.start,rangeP.stop-1)
-
-    ax1.yaxis.grid(True, 'both', linestyle='dotted')
-    nofPlots = len(dataY)
-    if rangeY is not None:
-        ax1.set_ylim(rangeY)
-    colors = [ matplotlib.colors.hsv_to_rgb((hv/nofPlots, 1, 1)) for hv in range(nofPlots) ]
-    for idx , data in enumerate(dataY):
-        ax1.plot(dataX, data[rangeP], linestyle='-',  color=colors[idx])
-
-    if dataYR is not None : # right Y axis
-        ax2 = ax1.twinx()
-        ax2.yaxis.grid(True, 'both', linestyle='dotted')
-        nofPlots = len(dataYR)
-        if rangeYR is not None:
-            ax2.set_ylim(rangeYR)
-        colors = [ matplotlib.colors.hsv_to_rgb((hv/nofPlots, 1, 1)) for hv in range(nofPlots) ]
-        for idx , data in enumerate(dataYR):
-            ax2.plot(dataX, data[rangeP], linestyle='dashed',  color=colors[idx])
-
-    if saveTo:
-        fig.savefig(saveTo)
-    if not show:
-        plt.close(fig)
-    else :
-        plt.show()
-
-
-def plotImage(image) :
-    plt.imshow(image, cmap='gray')
-    plt.axis("off")
-    plt.show()
-
-
-def unsqeeze4dim(tens):
-    orgDims = tens.dim()
-    if tens.dim() == 2 :
-        tens = tens.unsqueeze(0)
-    if tens.dim() == 3 :
-        tens = tens.unsqueeze(1)
-    return tens, orgDims
-
-
-def squeezeOrg(tens, orgDims):
-    if orgDims == tens.dim():
-        return tens
-    if tens.dim() != 4 or orgDims > 4 or orgDims < 2:
-        raise Exception(f"Unexpected dimensions to squeeze: {tens.dim()} {orgDims}.")
-    if orgDims < 4 :
-        if tens.shape[1] > 1:
-            raise Exception(f"Cant squeeze dimension 1 in: {tens.shape}.")
-        tens = tens.squeeze(1)
-    if orgDims < 3 :
-        if tens.shape[0] > 1:
-            raise Exception(f"Cant squeeze dimension 0 in: {tens.shape}.")
-        tens = tens.squeeze(0)
-    return tens
-
-
-
-
-def getData(inputString):
-    sampleHDF = inputString.split(':')
-    if len(sampleHDF) != 2 :
-        raise Exception(f"String \"{inputString}\" does not represent an HDF5 format \"fileName:container\".")
-    try :
-        trgH5F =  h5py.File(sampleHDF[0],'r')
-    except :
-        raise Exception(f"Failed to open HDF file '{sampleHDF[0]}'.")
-    if  sampleHDF[1] not in trgH5F.keys():
-        raise Exception(f"No dataset '{sampleHDF[1]}' in input file {sampleHDF[0]}.")
-    data = trgH5F[sampleHDF[1]]
-    if not data.size :
-        raise Exception(f"Container \"{inputString}\" is zero size.")
-    sh = data.shape
-    if len(sh) != 3 :
-        raise Exception(f"Dimensions of the container \"{inputString}\" is not 3: {sh}.")
-    return data
-
-
 if args.verbose :
     print("Reading input ...", end="", flush=True)
 
-kernelImage = loadImage(os.path.dirname(__file__) + "/ball.tif")
+kernelImage = cs.loadImage(os.path.dirname(__file__) + "/ball.tif")
 ksh = kernelImage.shape
 kernel = torch.tensor(kernelImage, device=device).unsqueeze(0).unsqueeze(0)
 st, mn = torch.std_mean(kernel)
 kernel = ( kernel - mn ) / st
 kernelBin = torch.where(kernel>0, 0, 1).to(torch.float32).to(device)
 
-data = getData(args.images)
-dataN = np.empty(data.shape, dtype=np.float32)
-data.read_direct(dataN)
+data = cs.getInData(args.images, args.verbose, preread=True)
 dsh = data.shape[1:]
 nofF = data.shape[0]
 
-maskImage = loadImage(args.mask, dsh) if args.mask else np.ones(dsh)
+maskImage = cs.loadImage(args.mask, dsh) if args.mask else np.ones(dsh)
 maskImage /= maskImage.max()
 maskPad = torch.zeros( (1, 1, dsh[-2] + 2*ksh[-2] - 2, dsh[-1] + 2*ksh[-1] - 2 ) )
 maskPad[..., ksh[-2]-1 : -ksh[-2]+1, ksh[-1]-1 : -ksh[-1]+1 ] = torch.from_numpy(maskImage).unsqueeze(0).unsqueeze(0)
@@ -347,7 +209,7 @@ def selectVisually() :
 
 
 def normalizeWithMask(ten, msk) :
-    ten, odim = unsqeeze4dim(ten)
+    ten, odim = cs.unsqeeze4dim(ten)
     maskSum = torch.count_nonzero(msk)
     ten *= msk
     mn = ten.sum(dim=(-2,-1)).view(-1,1,1,1) / maskSum
@@ -355,7 +217,7 @@ def normalizeWithMask(ten, msk) :
     ten *= msk
     st = ten.norm(p=2, dim=(-2,-1)).view(-1,1,1,1) / maskSum
     ten /= st
-    return squeezeOrg(ten,odim)
+    return cs.squeezeOrg(ten,odim)
 
 
 def removeBorders(img, mask) :
@@ -433,7 +295,7 @@ def trackIt() :
         nofR = stopIndex-startIndex
         dataPad = torch.zeros( (nofR, 1, dsh[-2] + 2*ksh[-2] - 2, dsh[-1] + 2*ksh[-1] - 2 ) )
         dataPad[ ... , ksh[-2]-1 : -ksh[-2]+1, ksh[-1]-1 : -ksh[-1]+1 ] = \
-            torch.from_numpy(dataN[fRange,...]).unsqueeze(1)
+            torch.from_numpy(data[fRange,...]).unsqueeze(1)
         dataPad = dataPad.to(device)
         dataPad = normalizeWithMask(dataPad, maskPad)
         dataCorr = fn.conv2d(dataPad, kernel) * maskCount
@@ -468,7 +330,7 @@ def trackItFine(poses) :
         arSz = ( imTo[0] - imFrom[0], imTo[1] - imFrom[1])
         dstFrom = (imFrom[0] - pos[0] + neib , imFrom[1] - pos[1] + neib  )
         dataBuf[cursl, dstFrom[0] : dstFrom[0]+arSz[0] , dstFrom[1] : dstFrom[1]+arSz[1] ] = \
-            torch.from_numpy(dataN)[cursl , imFrom[0]:imTo[0], imFrom[1]:imTo[1] ]
+            torch.from_numpy(data[cursl , imFrom[0]:imTo[0], imFrom[1]:imTo[1] ])
         maskBuf[cursl, dstFrom[0] : dstFrom[0]+arSz[0] , dstFrom[1] : dstFrom[1]+arSz[1] ] = \
             torch.from_numpy(maskImage)[imFrom[0]:imTo[0], imFrom[1]:imTo[1] ]
         dataBuf[cursl,...] = normalizeWithMask( dataBuf[cursl,...], maskBuf[cursl,...] )
@@ -623,7 +485,7 @@ if args.only :
 np.savetxt(args.out if args.out else sys.stdout.buffer, results, fmt='%i')
 if args.verbose :
     plotName = os.path.splitext(args.out)[0] + "_plot.png"
-    plotData( (results[:,0], results[:,1]),
+    cs.plotData( (results[:,0], results[:,1]),
               dataYR=(results[:,2], results[:,3]),
               saveTo = plotName, show = False)
 

@@ -21,20 +21,15 @@ import h5py
 import tifffile
 import tqdm
 
+import commonsource as cs
+
 myPath = os.path.dirname(os.path.realpath(__file__))
 
-parser = argparse.ArgumentParser(description=
-    'Fill sinograms with sinogap NN.')
+parser = argparse.ArgumentParser(description='First estimation of shift and rotation centre.')
 parser.add_argument('input', type=str, default="",
                     help='Input stack of CT projections to fill.')
-parser.add_argument('output', type=str, default="",
-                    help='Output filled stack.')
 parser.add_argument('-m', '--mask', type=str, default="",
                     help='Mask of the input stack.')
-parser.add_argument('-M', '--model', type=str, default="",
-                    help='Mask of the input stack.')
-parser.add_argument('-v', '--verbose', action='store_true', default=False,
-                    help='Plot results.')
 args = parser.parse_args()
 
 if args.model in ["", "default", "3", "mse"] :
@@ -66,107 +61,6 @@ except:
 #%% FUNCS
 
 
-
-
-def loadImage(imageName, expectedShape=None) :
-    if not imageName:
-        return None
-    #imdata = imread(imageName).astype(np.float32)
-    imdata = tifffile.imread(imageName).astype(np.float32)
-    if len(imdata.shape) == 3 :
-        imdata = np.mean(imdata[:,:,0:3], 2)
-    if not expectedShape is None  and  imdata.shape != expectedShape :
-        raise Exception(f"Dimensions of the input image \"{imageName}\" {imdata.shape} "
-                        f"do not match expected shape {expectedShape}.")
-    return imdata
-
-
-def addToHDF(filename, containername, data) :
-    if len(data.shape) == 2 :
-        data=np.expand_dims(data, 0)
-    if len(data.shape) != 3 :
-        raise Exception(f"Not appropriate input array size {data.shape}.")
-
-    with h5py.File(filename,'a') as file :
-
-        if  containername not in file.keys():
-            dset = file.create_dataset(containername, data.shape,
-                                       maxshape=(None,data.shape[1],data.shape[2]),
-                                       dtype='f')
-            dset[()] = data
-            return
-
-        dset = file[containername]
-        csh = dset.shape
-        if csh[1] != data.shape[1] or csh[2] != data.shape[2] :
-            raise Exception(f"Shape mismatch: input {data.shape}, file {dset.shape}.")
-        msh = dset.maxshape
-        newLen = csh[0] + data.shape[0]
-        if msh[0] is None or msh[0] >= newLen :
-            dset.resize(newLen, axis=0)
-        else :
-            raise Exception(f"Insufficient maximum shape {msh} to add data"
-                            f" {data.shape} to current volume {dset.shape}.")
-        dset[csh[0]:newLen,...] = data
-        file.close()
-
-
-    return 0
-
-
-def getInData(inputString):
-    nameSplit = inputString.split(':')
-    if len(nameSplit) == 1 : # tiff image
-        data = loadImage(nameSplit[0])
-        data = np.expand_dims(data, 1)
-        return data
-    if len(nameSplit) != 2 :
-        raise Exception(f"String \"{inputString}\" does not represent an HDF5 format \"fileName:container\".")
-    hdfName = nameSplit[0]
-    hdfVolume = nameSplit[1]
-    try :
-        trgH5F =  h5py.File(hdfName,'r')
-    except :
-        raise Exception(f"Failed to open HDF file '{hdfName}'.")
-    if  hdfVolume not in trgH5F.keys():
-        raise Exception(f"No dataset '{hdfVolume}' in input file {hdfName}.")
-    data = trgH5F[hdfVolume]
-    if not data.size :
-        raise Exception(f"Container \"{inputString}\" is zero size.")
-    sh = data.shape
-    if len(sh) != 3 :
-        raise Exception(f"Dimensions of the container \"{inputString}\" is not 3: {sh}.")
-    dataN = np.empty(data.shape, dtype=np.float32)
-    if args.verbose :
-        print("Reading input ... ", end="", flush=True)
-    data.read_direct(dataN)
-    if args.verbose :
-        print("Done.")
-    return dataN
-
-
-def getOutData(outputString, shape) :
-    if len(shape) == 2 :
-        shape = (1,*shape)
-    if len(shape) != 3 :
-        raise Exception(f"Not appropriate output array size {shape}.")
-
-    sampleHDF = outputString.split(':')
-    if len(sampleHDF) != 2 :
-        raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
-    try :
-        trgH5F =  h5py.File(sampleHDF[0],'w')
-    except :
-        raise Exception(f"Failed to open HDF file '{sampleHDF[0]}'.")
-
-    if  sampleHDF[1] not in trgH5F.keys():
-        dset = trgH5F.create_dataset(sampleHDF[1], shape, dtype='f')
-    else :
-        dset = trgH5F[sampleHDF[1]]
-        csh = dset.shape
-        if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
-            raise Exception(f"Shape mismatch: input {shape}, file {dset.shape}.")
-    return dset, trgH5F
 
 
 class OutputWrapper:
@@ -317,9 +211,9 @@ def fillSinogram(sinogram) :
 
 
 
-inData = getInData(args.input)
+inData = cs.getInData(args.input, preread=True)
 fsh = inData.shape[1:]
-mask = loadImage(args.mask, fsh) if len(args.mask) else None
+mask = cs.loadImage(args.mask, fsh) if len(args.mask) else None
 leftMask = np.ones(fsh, dtype=np.uint8)
 outWrapper = OutputWrapper(args.output, inData.shape)
 

@@ -573,7 +573,7 @@ if (( stage >= fromStage )) ; then
     stitchOpt="$beverboseO"
     stitchOpt="$stitchOpt -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g ${shiftX},${shiftY} -c $centdiv"
     stitchOpt="$stitchOpt -m ${fillOut}org_mask.tif -M ${fillOut}sft_mask.tif "
-    execMe "imbl-shift.sh $stitchOpt ${fillOut}org.hdf:/data ${fillOut}sft.hdf:/data ${stitchOut}:/data"
+    execMe "$EXEPATH/stitch.sh $stitchOpt ${fillOut}org.hdf:/data ${fillOut}sft.hdf:/data ${stitchOut}:/data"
   fi
   cleanUp "${fillOut}"
 fi
