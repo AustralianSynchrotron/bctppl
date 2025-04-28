@@ -117,6 +117,53 @@ def getOutData(outputString, shape) :
     return dset, trgH5F
 
 
+class OutputWrapper:
+
+    def __init__(self, outputString, shape):
+        if len(shape) != 3 :
+            raise Exception(f"Not appropriate output array size {shape}.")
+        nameSplit = outputString.split(':')
+        self.trgH5F = None
+        if len(nameSplit) == 1 : # tiff image
+            if shape[1] != 1 :
+                raise Exception(f"Cannot save 3D data {shape} from input to a tiff file.")
+            self.TiffName = nameSplit[0]
+            return
+        self.TiffName = None
+        if len(nameSplit) != 2 :
+            raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
+        hdfName = nameSplit[0]
+        hdfVolume = nameSplit[1]
+        try :
+            self.trgH5F =  h5py.File(hdfName,'w')
+        except :
+            raise Exception(f"Failed to open HDF file '{hdfName}'.")
+        if  hdfVolume not in self.trgH5F.keys():
+            self.dset = self.trgH5F.create_dataset(hdfVolume, shape, dtype='f')
+        else :
+            self.dset = self.trgH5F[hdfVolume]
+            csh = self.dset.shape
+            if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
+                raise Exception(f"Shape mismatch: input {shape}, output HDF {self.dset.shape}.")
+
+    def __del__(self):
+        if self.trgH5F is not None :
+            self.trgH5F.close()
+
+    def put(self, data, slice):
+        if len(data.shape) != 2 :
+            raise Exception(f"Output accepts 2D data. Got shape {data.shape} instead.")
+        if self.TiffName is not None :
+            tifffile.imwrite(self.TiffName, data)
+            if slice != 0 :
+                Warning(f"Output is a tiff file, but non-zero slice {slice} is saved.")
+        elif self.trgH5F is not None :
+            self.dset[:,slice,:] = data
+        else :
+            raise Exception(f"Output is not defined. Should never happen.")
+
+
+
 def plotData(dataY, rangeY=None, dataYR=None, rangeYR=None,
              dataX=None, rangeX=None, rangeP=None,
              figsize=(16,8), saveTo=None, show=True):
@@ -265,6 +312,8 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
         if maskS.dim == 2:
             maskS = maskS[None,:,:]
         inS *= maskS
+    if isinstance(amplitude, int) :
+        amplitude = (amplitude, amplitude)
 
     def individualNorm(inData, msk=None) :
         #im_mean = inData.sum(dim=(-1,-2)) / \
@@ -277,23 +326,23 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
     inSn = individualNorm(inS, maskS)
     #convolution
 
-    results = torch.empty( (3, nofSl, amplitude*2+1, amplitude*2+1 ),
+    results = torch.empty( (3, nofSl, amplitude[-2]*2+1, amplitude[-1]*2+1 ),
                            dtype=torch.float32, device=device)
     if verbose > 1 :
-        pbar = tqdm.tqdm(total=(2*amplitude+1)**2)
+        pbar = tqdm.tqdm(total=(2*amplitude[-2]+1)*(2*amplitude[-1]+1))
     elif verbose == 1:
-        pbar = tqdm.tqdm(total=2*amplitude+1)
+        pbar = tqdm.tqdm(total=2*amplitude[-1]+1)
     else :
         pbar = None
 
-    for shiftX in range(-amplitude, amplitude+1) :
-        for shiftY in range(-amplitude, amplitude+1) :
+    for shiftX in range(-amplitude[-1], amplitude[-1]+1) :
+        for shiftY in range(-amplitude[-2], amplitude[-2]+1) :
 
-            pos = (shiftY+amplitude, shiftX+amplitude)
-            subF = np.s_[ max(0, start[0]+shiftY) : face[-2] + min(start[0]+shiftY, 0),
-                          max(0, start[1]+shiftX) : face[-1] + min(start[1]+shiftX, 0)]
-            subS = np.s_[ max(0, start[0]-shiftY) : face[-2] + min(start[0]-shiftY, 0),
-                          max(0, start[1]-shiftX) : face[-1] + min(start[1]-shiftX, 0)]
+            pos = (shiftY+amplitude[-2], shiftX+amplitude[-1])
+            subF = np.s_[ max(0,  start[0]+shiftY) : face[-2] + min( start[0]+shiftY, 0),
+                          max(0,  start[1]+shiftX) : face[-1] + min( start[1]+shiftX, 0)]
+            subS = np.s_[ max(0, -start[0]-shiftY) : face[-2] + min(-start[0]-shiftY, 0),
+                          max(0, -start[1]-shiftX) : face[-1] + min(-start[1]-shiftX, 0)]
 
             if maskF is None and maskS is None :
                 convNorm =  math.prod(inFn[0,*subF].shape) * torch.ones((nofSl,1), device=device)
@@ -325,8 +374,8 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
         sfts = []
         vals = []
         for i in range(nofSl) :
-            pos = divmod(indeces[i].item(), 2*amplitude + 1)
-            sfts.append( (pos[0]-amplitude, pos[1]-amplitude) )
+            pos = divmod(indeces[i].item(), 2*amplitude[-1] + 1)
+            sfts.append( (pos[0]-amplitude[-2], pos[1]-amplitude[-1]) )
             vals.append( conved[i, *pos].item() )
         return sfts, vals
     #def shift(conved) :
