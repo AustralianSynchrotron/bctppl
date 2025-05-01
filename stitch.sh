@@ -253,7 +253,7 @@ doStitch() {
   stO=$(($firstO+$1))
   stS=$(($firstS+$2))
   if [ -z "$outVol" ] ; then # empty input: just print shifts
-    for (( cnt=0 ; cnt<=$3 ; cnt++ )) ; do
+    for (( cnt=0 ; cnt < $3 ; cnt++ )) ; do
       echo $(( stO + cnt )) $(( stS + cnt )) "$4"
     done
   else

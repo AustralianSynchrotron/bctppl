@@ -24,6 +24,21 @@ import tqdm
 import commonsource as cs
 
 myPath = os.path.dirname(os.path.realpath(__file__))
+device = torch.device('cuda:0')
+maxBatchSize = 0
+try:
+    localCfgDict = dict()
+    exec(open(os.path.join(myPath, ".local.cfg")).read(),localCfgDict)
+    if 'torchdevice' in localCfgDict :
+        device = torch.device(localCfgDict['torchdevice'])
+    if 'sinogap_maxBatchSize' in localCfgDict :
+        maxBatchSize = localCfgDict['sinogap_maxBatchSize']
+except KeyError:
+    raise
+except:
+    pass
+cs.device = device
+
 
 parser = argparse.ArgumentParser(description='First estimation of shift and rotation centre.')
 parser.add_argument('input', type=str, default="",
@@ -39,74 +54,6 @@ elif args.model in ["2", "adv"] :
 else :
     raise Exception(f"Unknown model \"{args.model}\" given via -M/--model option.", )
 
-
-
-
-
-
-device = torch.device('cuda:0')
-maxBatchSize = 0
-try:
-    localCfgDict = dict()
-    exec(open(os.path.join(myPath, ".local.cfg")).read(),localCfgDict)
-    if 'torchdevice' in localCfgDict :
-        device = torch.device(localCfgDict['torchdevice'])
-    if 'maxBatchSize' in localCfgDict :
-        maxBatchSize = localCfgDict['maxBatchSize']
-except KeyError:
-    raise
-except:
-    pass
-
-#%% FUNCS
-
-
-
-
-class OutputWrapper:
-
-    def __init__(self, outputString, shape):
-        if len(shape) != 3 :
-            raise Exception(f"Not appropriate output array size {shape}.")
-        nameSplit = outputString.split(':')
-        self.trgH5F = None
-        if len(nameSplit) == 1 : # tiff image
-            if shape[1] != 1 :
-                raise Exception(f"Cannot save 3D data {shape} from input to a tiff file.")
-            self.TiffName = nameSplit[0]
-            return
-        self.TiffName = None
-        if len(nameSplit) != 2 :
-            raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
-        hdfName = nameSplit[0]
-        hdfVolume = nameSplit[1]
-        try :
-            self.trgH5F =  h5py.File(hdfName,'w')
-        except :
-            raise Exception(f"Failed to open HDF file '{hdfName}'.")
-        if  hdfVolume not in self.trgH5F.keys():
-            self.dset = self.trgH5F.create_dataset(hdfVolume, shape, dtype='f')
-        else :
-            self.dset = self.trgH5F[hdfVolume]
-            csh = self.dset.shape
-            if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
-                raise Exception(f"Shape mismatch: input {shape}, output HDF {self.dset.shape}.")
-
-    def __del__(self):
-        if self.trgH5F is not None :
-            self.trgH5F.close()
-
-    def put(self, data, slice):
-        if len(data.shape) != 2 :
-            raise Exception(f"Output accepts 2D data. Got shape {data.shape} instead.")
-        if self.TiffName is not None :
-            tifffile.imwrite(self.TiffName, data)
-            if slice != 0 :
-                Warning(f"Output is a tiff file, but non-zero slice {slice} is saved.")
-        elif self.trgH5F is not None :
-            self.dset[:,slice,:] = data
-        else :
-            raise Exception(f"Output is not defined. Should never happen.")
 
 #%% MODELS
 
@@ -215,7 +162,7 @@ inData = cs.getInData(args.input, preread=True)
 fsh = inData.shape[1:]
 mask = cs.loadImage(args.mask, fsh) if len(args.mask) else None
 leftMask = np.ones(fsh, dtype=np.uint8)
-outWrapper = OutputWrapper(args.output, inData.shape)
+outWrapper = cs.OutputWrapper(args.output, inData.shape)
 
 
 pbar = tqdm.tqdm(total=fsh[-2]) if args.verbose else None

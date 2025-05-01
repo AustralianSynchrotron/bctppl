@@ -4,11 +4,14 @@ import torch
 from torchvision import transforms
 import torch.nn.functional as fn
 import h5py
+from h5py import h5d
 import tifffile
 import matplotlib.pyplot as plt
 import ssim
 import tqdm
 import math
+import os
+import mmap
 
 device = torch.device('cuda:0')
 
@@ -71,7 +74,7 @@ def getInData(inputString, verbose=False, preread=False):
     hdfName = nameSplit[0]
     hdfVolume = nameSplit[1]
     try :
-        trgH5F =  h5py.File(hdfName,'r')
+        trgH5F =  h5py.File(hdfName,'r', swmr=True)
     except :
         raise Exception(f"Failed to open HDF file '{hdfName}'.")
     if  hdfVolume not in trgH5F.keys():
@@ -82,14 +85,43 @@ def getInData(inputString, verbose=False, preread=False):
     sh = data.shape
     if len(sh) != 3 :
         raise Exception(f"Dimensions of the container \"{inputString}\" is not 3: {sh}.")
-    if preread :
-        dataN = np.empty(data.shape, dtype=np.float32)
-        if verbose :
-            print("Reading input ... ", end="", flush=True)
-        data.read_direct(dataN)
-        if verbose :
-            print("Done.")
+    try : # try to mmap hdf5 if it is in memory
+        mmapPrefixes = os.environ["CTAS_MMAP_PATH"].split(':')
+        mmapPrefixes.append["/dev/shm"]
+        residesInMemory = False
+        for mmapPrefix in mmapPrefixes :
+            if hdfName.startswith(mmapPrefix) :
+                residesInMemory = True
+        if not residesInMemory :
+            raise Exception()
+        fileSize = trgH5F.id.get_filesize()
+        offset = data.id.get_offset()
+        dtype = data.id.dtype
+        plist = data.id.get_create_plist()
+        if offset < 0 \
+        or not plist.get_layout() in (h5d.CONTIGUOUS, h5d.CONTIGUOUS) \
+        or plist.get_external_count() \
+        or plist.get_nfilters() \
+        or fileSize - offset < math.prod(sh) * data.dtype().itemsize() :
+            raise Exception()
+        # now all is ready
+        hdfName = os.path.realpath(hdfName)
+        dataN = np.memmap(hdfName, shape=sh, dtype=dtype, mode='r', offset=offset)
         data = dataN
+        trgH5F.close()
+        #plist = trgH5F.id.get_access_plist()
+        #fileno = trgH5F.id.get_vfd_handle(plist)
+        #dataM = mmap.mmap(fileno, fileSize, offset=offset, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ)
+    except :
+        if preread :
+            dataN = np.empty(data.shape, dtype=np.float32)
+            if verbose :
+                print("Reading input ... ", end="", flush=True)
+            data.read_direct(dataN)
+            if verbose :
+                print("Done.")
+            data = dataN
+            trgH5F.close()
     return data
 
 
@@ -103,7 +135,7 @@ def getOutData(outputString, shape) :
     if len(sampleHDF) != 2 :
         raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
     try :
-        trgH5F =  h5py.File(sampleHDF[0],'w')
+        trgH5F =  h5py.File(sampleHDF[0],'w', libver='latest')
     except :
         raise Exception(f"Failed to open HDF file '{sampleHDF[0]}'.")
 
@@ -114,6 +146,7 @@ def getOutData(outputString, shape) :
         csh = dset.shape
         if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
             raise Exception(f"Shape mismatch: input {shape}, file {dset.shape}.")
+    trgH5F.swmr_mode = True
     return dset, trgH5F
 
 
@@ -125,7 +158,7 @@ class OutputWrapper:
         nameSplit = outputString.split(':')
         self.trgH5F = None
         if len(nameSplit) == 1 : # tiff image
-            if shape[1] != 1 :
+            if shape[0] != 1 :
                 raise Exception(f"Cannot save 3D data {shape} from input to a tiff file.")
             self.TiffName = nameSplit[0]
             return
@@ -135,7 +168,7 @@ class OutputWrapper:
         hdfName = nameSplit[0]
         hdfVolume = nameSplit[1]
         try :
-            self.trgH5F =  h5py.File(hdfName,'w')
+            self.trgH5F =  h5py.File(hdfName,'w', libver='latest')
         except :
             raise Exception(f"Failed to open HDF file '{hdfName}'.")
         if  hdfVolume not in self.trgH5F.keys():
@@ -144,11 +177,12 @@ class OutputWrapper:
             self.dset = self.trgH5F[hdfVolume]
             csh = self.dset.shape
             if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
-                raise Exception(f"Shape mismatch: input {shape}, output HDF {self.dset.shape}.")
+                raise Exception(f"Shape mismatch: input {shape}, output HDF {csh}.")
+        self.trgH5F.swmr_mode = True
 
-    def __del__(self):
-        if self.trgH5F is not None :
-            self.trgH5F.close()
+    #def __del__(self):
+    #    if self.trgH5F is not None :
+    #        self.trgH5F.close()
 
     def put(self, data, slice):
         if len(data.shape) != 2 :
@@ -158,7 +192,8 @@ class OutputWrapper:
             if slice != 0 :
                 Warning(f"Output is a tiff file, but non-zero slice {slice} is saved.")
         elif self.trgH5F is not None :
-            self.dset[:,slice,:] = data
+            self.dset[slice,...] = data
+            self.dset.flush()
         else :
             raise Exception(f"Output is not defined. Should never happen.")
 
@@ -296,8 +331,10 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
     face = inF.shape[-2:]
     if inF.shape != inS.shape :
         raise Exception(f"Input tensors must be of the same shape. Got: {inF.shape} and {inS.shape}.")
-    inF = torch.tensor(inF, device=device, requires_grad=False)
-    inS = torch.tensor(inS, device=device, requires_grad=False)
+    if not isinstance(inF, torch.Tensor) :
+        inF = torch.tensor(inF, device=device, requires_grad=False)
+    if not isinstance(inS, torch.Tensor) :
+        inS = torch.tensor(inS, device=device, requires_grad=False)
     if dims == 2 :
         inF = inF[None,:,:]
         inS = inS[None,:,:]
