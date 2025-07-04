@@ -40,19 +40,30 @@ except:
 cs.device = device
 
 
-parser = argparse.ArgumentParser(description='First estimation of shift and rotation centre.')
+parser = argparse.ArgumentParser(description='Fill missing data using sinogap model.')
 parser.add_argument('input', type=str, default="",
                     help='Input stack of CT projections to fill.')
+parser.add_argument('output', type=str, default="",
+                    help='Output HDF5 file.')
 parser.add_argument('-m', '--mask', type=str, default="",
                     help='Mask of the input stack.')
+parser.add_argument('-M', '--model', type=str, default="",
+                    help='Mask of the input stack.')
+parser.add_argument('-v', '--verbose', action='store_true', default=False,
+                    help='Be verbose.')
+
 args = parser.parse_args()
 
+if args.verbose :
+    print("Reading model ...", end="", flush=True)
 if args.model in ["", "default", "3", "mse"] :
     from models.model2 import loadMe as model
 elif args.model in ["2", "adv"] :
     from models.model3 import loadMe as model
 else :
     raise Exception(f"Unknown model \"{args.model}\" given via -M/--model option.", )
+if args.verbose :
+    print("Done.")
 
 
 #%% MODELS
@@ -151,25 +162,28 @@ def fillSinogram(sinogram) :
     resizedGap = torch.nn.functional.interpolate(
         stitchedGap, size=( stitchedGap.shape[-2] ,  blockW), mode='bilinear')
 
-    sinogram[..., 2*blockW : 3*blockW ] = resizedGap[0,0, sinoCutStep*4 : sinoCutStep*4 + sinoL, : ] / 2
+    sinogram[..., 2*blockW : 3*blockW ] = torch.where( sinogram[..., 2*blockW : 3*blockW ] > 0,
+        sinogram[..., 2*blockW : 3*blockW ], resizedGap[0,0, sinoCutStep*4 : sinoCutStep*4 + sinoL, : ] / 2 )
     return sinogram
 
 
 
-
-
+if args.verbose :
+    print("Reading input ...", end="", flush=True)
 inData = cs.getInData(args.input, preread=True)
 fsh = inData.shape[1:]
 mask = cs.loadImage(args.mask, fsh) if len(args.mask) else None
 leftMask = np.ones(fsh, dtype=np.uint8)
 outWrapper = cs.OutputWrapper(args.output, inData.shape)
-
+if args.verbose :
+    print(" Read.")
+    print(" Filling.")
 
 pbar = tqdm.tqdm(total=fsh[-2]) if args.verbose else None
 for curSl in range(fsh[-2]):
 
     inSinogram = torch.tensor(inData[:,curSl,:], device=model.TCfg.device)
-    sinoMask =  torch.where( inSinogram.sum(dim=0) == 0 , 0, 1 ) if mask is None else mask[curSl,:]
+    sinoMask =  torch.where( inSinogram.prod(dim=0) == 0 , 0, 1 ) if mask is None else mask[curSl,:]
 
     gaps = []
     clmn=0
@@ -229,7 +243,7 @@ for curSl in range(fsh[-2]):
     if len(gaps) :
         for gap in gaps :
             leftMask[curSl,gap] = 0
-    outWrapper.put(inSinogram.cpu().numpy(), curSl)
+    outWrapper.put(inSinogram.cpu().numpy(), np.s_[:,curSl,:], flush=False)
     if pbar is not None:
         pbar.update(1)
 

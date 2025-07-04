@@ -188,9 +188,9 @@ else # 3 positional arguments
   fi
 fi
 if [ -n "$outVol" ] ; then
-  chkf "$samO" "original input"
+  #chkf "$samO" "original input"
   chkhdf "$samO"
-  chkf "$samS" "shifted input"
+  #chkf "$samS" "shifted input"
   chkhdf "$samS"
 fi
 

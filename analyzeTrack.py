@@ -9,12 +9,14 @@ parser = argparse.ArgumentParser(description=
     'Analyzes results of ball tracking to find stich parameters.')
 parser.add_argument('torg', type=str, default="",
                     help='Results of tracking in original position.')
-parser.add_argument('tsft', type=str, default="",
+parser.add_argument('tsft', type=str, default="", nargs='?',
                     help='Results of tracking in shifted position.')
 parser.add_argument('-a', '--ark', type=int, default="",
-                    help='Number of steps to cover 180deg ark.')
-parser.add_argument('-s', '--sft', type=int, default="",
-                    help='Distance between first frames in shifted and original positions.')
+                    help='Number of steps to cover 180deg ark.'
+                         ' Ignored for single input.')
+parser.add_argument('-s', '--sft', type=int, default=0,
+                    help='Distance between first frames in shifted and original positions.'
+                         ' Ignored for single input.')
 parser.add_argument('-w', '--iwidth', type=int, default="",
                     help='Width of the image where the ball was tracked.')
 parser.add_argument('-W', '--kwidth', type=int, default="",
@@ -22,17 +24,6 @@ parser.add_argument('-W', '--kwidth', type=int, default="",
 args = parser.parse_args()
 
 
-resOrg = np.loadtxt( args.torg, dtype=int).astype(float)
-vOrg = resOrg[:,2]
-hOrg = resOrg[:,3]
-hOrg += ( args.kwidth - 1 ) / 2
-frameNofsOrg = np.linspace(0, resOrg.shape[0]-1, resOrg.shape[0])
-resSft = np.loadtxt( args.tsft, dtype=int).astype(float)
-vSft = resSft[:,2]
-hSft = resSft[:,3]
-hSft += ( args.kwidth - 1 ) / 2
-frameNofsSft = np.linspace(args.sft, args.sft+resSft.shape[0]-1, resSft.shape[0])
-f_pos = np.concatenate((frameNofsOrg, frameNofsSft))
 
 
 def fit_as_sin(dat, xdat) :
@@ -54,7 +45,30 @@ def fit_as_sin(dat, xdat) :
     return popt
 
 
+resOrg = np.loadtxt( args.torg, dtype=int).astype(float)
+vOrg = resOrg[:,2]
+hOrg = resOrg[:,3]
+hOrg += ( args.kwidth - 1 ) / 2
+frameNofsOrg = np.linspace(0, resOrg.shape[0]-1, resOrg.shape[0])
 poptOrg = fit_as_sin(hOrg, frameNofsOrg)
+
+if not args.tsft :
+    print(
+       round( resOrg[:,1].max() - resOrg[:,1].min()),
+       round( resOrg[:,0].max() - resOrg[:,0].min()),
+       0,
+       0,
+       poptOrg[0] - (args.iwidth - 1) / 2,
+       poptOrg[2])
+    exit(0)
+
+
+resSft = np.loadtxt( args.tsft, dtype=int).astype(float)
+vSft = resSft[:,2]
+hSft = resSft[:,3]
+hSft += ( args.kwidth - 1 ) / 2
+frameNofsSft = np.linspace(args.sft, args.sft+resSft.shape[0]-1, resSft.shape[0])
+f_pos = np.concatenate((frameNofsOrg, frameNofsSft))
 poptSft = fit_as_sin(hSft, frameNofsSft)
 
 sftFrame = ( args.ark + args.sft ) / 2

@@ -6,6 +6,7 @@ import torch.nn.functional as fn
 import h5py
 from h5py import h5d
 import tifffile
+import matplotlib
 import matplotlib.pyplot as plt
 import ssim
 import tqdm
@@ -63,6 +64,30 @@ def addToHDF(filename, containername, data) :
     return 0
 
 
+def residesInMemory(hdfName) :
+    mmapPrefixes = ["/dev/shm",]
+    if "CTAS_MMAP_PATH" in os.environ :
+        mmapPrefixes.append[os.environ["CTAS_MMAP_PATH"].split(':')]
+    hdfName = os.path.realpath(hdfName)
+    for mmapPrefix in mmapPrefixes :
+        if hdfName.startswith(mmapPrefix) :
+            return True
+    return False
+
+def goodForMmap(trgH5F, data) :
+    fileSize = trgH5F.id.get_filesize()
+    offset = data.id.get_offset()
+    plist = data.id.get_create_plist()
+    if offset < 0 \
+    or not plist.get_layout() in (h5d.CONTIGUOUS, h5d.COMPACT) \
+    or plist.get_external_count() \
+    or plist.get_nfilters() \
+    or fileSize - offset < math.prod(data.shape) * data.dtype.itemsize :
+        return None, None
+    else :
+        return offset, data.id.dtype
+
+
 def getInData(inputString, verbose=False, preread=False):
     nameSplit = inputString.split(':')
     if len(nameSplit) == 1 : # tiff image
@@ -86,26 +111,19 @@ def getInData(inputString, verbose=False, preread=False):
     if len(sh) != 3 :
         raise Exception(f"Dimensions of the container \"{inputString}\" is not 3: {sh}.")
     try : # try to mmap hdf5 if it is in memory
-        mmapPrefixes = os.environ["CTAS_MMAP_PATH"].split(':')
-        mmapPrefixes.append["/dev/shm"]
-        residesInMemory = False
-        for mmapPrefix in mmapPrefixes :
-            if hdfName.startswith(mmapPrefix) :
-                residesInMemory = True
-        if not residesInMemory :
+        if not residesInMemory(hdfName) :
             raise Exception()
         fileSize = trgH5F.id.get_filesize()
         offset = data.id.get_offset()
         dtype = data.id.dtype
         plist = data.id.get_create_plist()
         if offset < 0 \
-        or not plist.get_layout() in (h5d.CONTIGUOUS, h5d.CONTIGUOUS) \
+        or not plist.get_layout() in (h5d.CONTIGUOUS, h5d.COMPACT) \
         or plist.get_external_count() \
         or plist.get_nfilters() \
-        or fileSize - offset < math.prod(sh) * data.dtype().itemsize() :
+        or fileSize - offset < math.prod(sh) * data.dtype.itemsize :
             raise Exception()
         # now all is ready
-        hdfName = os.path.realpath(hdfName)
         dataN = np.memmap(hdfName, shape=sh, dtype=dtype, mode='r', offset=offset)
         data = dataN
         trgH5F.close()
@@ -125,29 +143,48 @@ def getInData(inputString, verbose=False, preread=False):
     return data
 
 
-def getOutData(outputString, shape) :
+def getOutData(outputString, shape, dtype='f') :
     if len(shape) == 2 :
         shape = (1,*shape)
     if len(shape) != 3 :
         raise Exception(f"Not appropriate output array size {shape}.")
-
-    sampleHDF = outputString.split(':')
-    if len(sampleHDF) != 2 :
+    nameSplit = outputString.split(':')
+    hdfName = nameSplit[0]
+    hdfVolume = nameSplit[1]
+    if len(nameSplit) != 2 :
         raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
     try :
-        trgH5F =  h5py.File(sampleHDF[0],'w', libver='latest')
+        trgH5F =  h5py.File(hdfName,'w', libver='latest')
     except :
-        raise Exception(f"Failed to open HDF file '{sampleHDF[0]}'.")
-
-    if  sampleHDF[1] not in trgH5F.keys():
-        dset = trgH5F.create_dataset(sampleHDF[1], shape, dtype='f')
-    else :
-        dset = trgH5F[sampleHDF[1]]
-        csh = dset.shape
-        if csh[0] < shape[0] or csh[1] != shape[1] or csh[2] != shape[2] :
-            raise Exception(f"Shape mismatch: input {shape}, file {dset.shape}.")
+        raise Exception(f"Failed to open HDF file '{hdfName}'.")
+    trgH5F.require_dataset(hdfVolume, shape, dtype=dtype, exact=True)
+    dset = trgH5F[hdfVolume]
+#    if  hdfVolume in trgH5F.keys() and trgH5F[hdfVolume].shape == shape : # existing dataset
+#    if residesInMemory(hdfName) :
+#        #spaceid = h5py.h5s.create_simple((numRows, numCols))
+#        plist = h5py.h5p.create(h5py.h5p.DATASET_CREATE)
+#        plist.set_fill_time(h5d.FILL_TIME_NEVER)
+#        plist.set_alloc_time(h5d.ALLOC_TIME_EARLY)
+#        plist.set_layout(h5d.CONTIGUOUS)
+#        datasetid = h5py.h5d.create(fout.id, "rows", h5py.h5t.NATIVE_DOUBLE, spaceid, plist)
+#    else :
     trgH5F.swmr_mode = True
     return dset, trgH5F
+
+
+def ten2hdf(outputString, data) :
+    nameSplit = outputString.split(':')
+    hdfName = nameSplit[0]
+    hdfVolume = nameSplit[1]
+    if len(nameSplit) != 2 :
+        raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
+    try :
+        trgH5F =  h5py.File(hdfName,'w', libver='latest')
+    except :
+        raise Exception(f"Failed to open HDF file '{hdfName}'.")
+    trgH5F.require_dataset(hdfVolume, data.shape, dtype=data.dtype, exact=True)
+    trgH5F[hdfVolume][...] = data
+    trgH5F.close()
 
 
 class OutputWrapper:
@@ -160,17 +197,16 @@ class OutputWrapper:
         if len(nameSplit) == 1 : # tiff image
             if shape[0] != 1 :
                 raise Exception(f"Cannot save 3D data {shape} from input to a tiff file.")
-            self.TiffName = nameSplit[0]
+            self.name = nameSplit[0]
             return
-        self.TiffName = None
         if len(nameSplit) != 2 :
             raise Exception(f"String \"{outputString}\" does not represent an HDF5 format \"fileName:container\".")
-        hdfName = nameSplit[0]
+        self.name = nameSplit[0]
         hdfVolume = nameSplit[1]
         try :
-            self.trgH5F =  h5py.File(hdfName,'w', libver='latest')
+            self.trgH5F =  h5py.File(self.name,'w', libver='latest')
         except :
-            raise Exception(f"Failed to open HDF file '{hdfName}'.")
+            raise Exception(f"Failed to open HDF file '{self.name}'.")
         if  hdfVolume not in self.trgH5F.keys():
             self.dset = self.trgH5F.create_dataset(hdfVolume, shape, dtype='f')
         else :
@@ -184,16 +220,19 @@ class OutputWrapper:
     #    if self.trgH5F is not None :
     #        self.trgH5F.close()
 
-    def put(self, data, slice):
+    def put(self, data, slice, flush=True) :
         if len(data.shape) != 2 :
             raise Exception(f"Output accepts 2D data. Got shape {data.shape} instead.")
-        if self.TiffName is not None :
-            tifffile.imwrite(self.TiffName, data)
+        if self.trgH5F is None : # tiff output
+            tifffile.imwrite(self.name, data)
             if slice != 0 :
                 Warning(f"Output is a tiff file, but non-zero slice {slice} is saved.")
-        elif self.trgH5F is not None :
-            self.dset[slice,...] = data
-            self.dset.flush()
+        elif self.dset is not None : # hdf output
+            if isinstance(slice, int) :
+                slice = np.s_[slice,...]
+            self.dset[slice] = data
+            if flush :
+                self.dset.flush()
         else :
             raise Exception(f"Output is not defined. Should never happen.")
 
@@ -249,7 +288,7 @@ def plotData(dataY, rangeY=None, dataYR=None, rangeYR=None,
     nofPlots = len(dataY)
     if rangeY is not None:
         ax1.set_ylim(rangeY)
-    colors = [ plt.colors.hsv_to_rgb((hv/nofPlots, 1, 1)) for hv in range(nofPlots) ]
+    colors = [ matplotlib.colors.hsv_to_rgb((hv/nofPlots, 1, 1)) for hv in range(nofPlots) ]
     for idx , data in enumerate(dataY):
         ax1.plot(dataX, data[rangeP], linestyle='-',  color=colors[idx])
 
@@ -259,7 +298,7 @@ def plotData(dataY, rangeY=None, dataYR=None, rangeYR=None,
         nofPlots = len(dataYR)
         if rangeYR is not None:
             ax2.set_ylim(rangeYR)
-        colors = [ plt.colors.hsv_to_rgb((hv/nofPlots, 1, 1)) for hv in range(nofPlots) ]
+        colors = [ matplotlib.colors.hsv_to_rgb((hv/nofPlots, 1, 1)) for hv in range(nofPlots) ]
         for idx , data in enumerate(dataYR):
             ax2.plot(dataX, data[rangeP], linestyle='dashed',  color=colors[idx])
 
@@ -320,10 +359,11 @@ def stretchImage(image) :
     return image
 
 
-SSIM_loss = ssim.SSIM(data_range=2.0, size_average=False, channel=1)
 
 
 def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbose=False) :
+
+    SSIM_loss = ssim.SSIM(data_range=2.0, size_average=False, channel=1)
 
     dims = len(inF.shape)
     if dims < 2 :
@@ -340,12 +380,14 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
         inS = inS[None,:,:]
     nofSl = inF.shape[0]
     if maskF is not None :
-        maskF = torch.tensor(maskF, device=device, requires_grad=False)
+        if not isinstance(maskF, torch.Tensor) :
+            maskF = torch.tensor(maskF, device=device, requires_grad=False)
         if maskF.dim == 2:
             maskF = maskF[None,:,:]
         inF *= maskF
     if maskS is not None :
-        maskS = torch.tensor(maskS, device=device, requires_grad=False)
+        if not isinstance(maskS, torch.Tensor) :
+            maskS = torch.tensor(maskS, device=device, requires_grad=False)
         if maskS.dim == 2:
             maskS = maskS[None,:,:]
         inS *= maskS
@@ -391,14 +433,15 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
                 convNorm = (maskF[...,*subF] * maskS[...,*subS]).sum(dim=(-1,-2))
             convNorm = torch.where(convNorm > 0, 1/convNorm, 0)
 
-            results[0,:,*pos] = convNorm * \
-                (inFn[:,*subF] * inSn[:,*subS]).sum(dim=(-1,-2))
+            #results[0,:,*pos] = convNorm * \
+            #    (inFn[:,*subF] * inSn[:,*subS]).sum(dim=(-1,-2))
 
-            results[1,:,*pos] = - convNorm * fn.mse_loss( # negate to search for max
-                inFn[:,*subF], inSn[:,*subS], reduction='none').sum(dim=(-1,-2))
+            #results[1,:,*pos] = - convNorm * fn.mse_loss( # negate to search for max
+            #    inFn[:,*subF], inSn[:,*subS], reduction='none').sum(dim=(-1,-2))
 
-            results[2,:,*pos] = SSIM_loss( torch.clamp(inFn[:,None,*subF]+1, 0, 2)*maskF[...,*subF] ,
-                                           torch.clamp(inSn[:,None,*subS]+1, 0, 2)*maskS[...,*subS] )
+            results[2,:,*pos] = convNorm * SSIM_loss(
+                torch.clamp(inFn[:,None,*subF]+1, 0, 2)*maskF[...,*subF] ,
+                torch.clamp(inSn[:,None,*subS]+1, 0, 2)*maskS[...,*subS] )
 
             if verbose > 1:
                 pbar.update(1)
@@ -409,22 +452,15 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
         flatres = conved.view(nofSl, -1)
         indeces = torch.argmax(flatres, dim=-1)
         sfts = []
-        vals = []
+        #vals = []
         for i in range(nofSl) :
             pos = divmod(indeces[i].item(), 2*amplitude[-1] + 1)
             sfts.append( (pos[0]-amplitude[-2], pos[1]-amplitude[-1]) )
-            vals.append( conved[i, *pos].item() )
-        return sfts, vals
-    #def shift(conved) :
-    #    toRet = []
-    #    for i in range(nofSl) :
-    #        inarr = conved[i,...].clone()
-    #        inarr *= inarr
-    #        pos = sp.center_of_mass(inarr.cpu().numpy())
-    #        toRet.append( (float(pos[0])-amplitude, float(pos[1])-amplitude) )
-    #    return toRet
+            #vals.append( conved[i, *pos].item() )
+        return sfts#, vals
     toRet = []
+    onlyRes = shift(results[2,...])
     for meth in range(results.shape[0]) :
-        sfts, vals = shift(results[meth,...])
-        toRet.append((sfts, vals))
+        #toRet.append(shift(results[meth,...]))
+        toRet.append(onlyRes)
     return toRet

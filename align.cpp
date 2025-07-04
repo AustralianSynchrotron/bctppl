@@ -98,29 +98,32 @@ int main(int argc, char *argv[]) { {
   const Shape<2> osh( ish(0)-2*yWid , ish(1)-2*xWid );
   Map mask, omask;
   if (!args.mask.empty()) {
-    ReadImage(args.mask, mask, ish);
-    mask /= max(mask);
     omask.resize(osh);
     omask = 1.0;
+    if (args.mask != "0") {
+      ReadImage(args.mask, mask, ish);
+      mask /= max(mask);
+    }
   }
   const Crop<2> crp( Segment(2*yWid, osh(0)+2*yWid), Segment(2*xWid, osh(1)+2*xWid) );
   SaveVolumeBySlice oVol( args.outimages, Shape<3>( nofIm, osh(0), osh(1) ) );
 
   ProgressBar bar(args.beverbose, "Aligning", nofIm);
-  InThread::execute( nofIm, [&](long int curIm){
-    Map iIm(ish);
-    Map genMap(ish(0)+2*yWid, ish(1)+2*xWid);
-    iVol.readTo(curIm, iIm);
-    genMap( blitz::Range(yShifts(curIm), yShifts(curIm) + ish(0)-1),
-            blitz::Range(xShifts(curIm), xShifts(curIm) + ish(1)-1) ) = iIm;
-    oVol.save(curIm, crp.apply(genMap));
-    if (omask.size()) {
-      genMap( blitz::Range(yShifts(curIm), yShifts(curIm) + ish(0)-1),
-              blitz::Range(xShifts(curIm), xShifts(curIm) + ish(1)-1) ) = mask;
-      omask *= crp.apply(genMap);
-    }
-    bar.update();
-  } );
+  InThread::execute( nofIm,
+    [&](long int curIm){
+      Map iIm(ish);
+      iVol.readTo(curIm, iIm);
+      Map genMap(ish(0)+2*yWid, ish(1)+2*xWid);
+      Map subGen = genMap( blitz::Range(yShifts(curIm), yShifts(curIm) + ish(0)-1),
+                           blitz::Range(xShifts(curIm), xShifts(curIm) + ish(1)-1) );
+      subGen = iIm;
+      oVol.save(curIm, crp.apply(genMap));
+      if (omask.size()) {
+        subGen = mask.size() ? mask : Map(blitz::where( iIm == 0 , 0.0, 1.0 ));
+        omask *= crp.apply(genMap);
+      }
+      bar.update();
+    } );
   if (omask.size()) {
     const string omaskName = args.outimages.dtitle() + "_mask.tif";
     SaveImage(omaskName, omask);
