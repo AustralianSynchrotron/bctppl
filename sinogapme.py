@@ -57,9 +57,9 @@ args = parser.parse_args()
 if args.verbose :
     print("Reading model ...", end="", flush=True)
 if args.model in ["", "default", "3", "mse"] :
-    from models.model2 import loadMe as model
-elif args.model in ["2", "adv"] :
     from models.model3 import loadMe as model
+elif args.model in ["2", "adv"] :
+    from models.model2 import loadMe as model
 else :
     raise Exception(f"Unknown model \"{args.model}\" given via -M/--model option.", )
 if args.verbose :

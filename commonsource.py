@@ -363,7 +363,7 @@ def stretchImage(image) :
 
 def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbose=False) :
 
-    SSIM_loss = ssim.SSIM(data_range=2.0, size_average=False, channel=1)
+    SSIM_loss = ssim.MS_SSIM(data_range=2.0, size_average=False, channel=1, win_size=11)
 
     dims = len(inF.shape)
     if dims < 2 :
@@ -439,9 +439,11 @@ def findShift(inF, inS, maskF=None, maskS=None, amplitude=0, start=(0,0), verbos
             #results[1,:,*pos] = - convNorm * fn.mse_loss( # negate to search for max
             #    inFn[:,*subF], inSn[:,*subS], reduction='none').sum(dim=(-1,-2))
 
-            results[2,:,*pos] = convNorm * SSIM_loss(
-                torch.clamp(inFn[:,None,*subF]+1, 0, 2)*maskF[...,*subF] ,
-                torch.clamp(inSn[:,None,*subS]+1, 0, 2)*maskS[...,*subS] )
+            commonMask = maskS[...,*subS]*maskF[...,*subF]
+            results[2,:,*pos] = SSIM_loss(
+                torch.clamp(inFn[:,None,*subF]+1, 0, 2)*commonMask ,
+                torch.clamp(inSn[:,None,*subS]+1, 0, 2)*commonMask \
+                    )#, mask = commonMask[None,None,...] > 0 )
 
             if verbose > 1:
                 pbar.update(1)

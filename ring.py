@@ -87,12 +87,17 @@ inData = cs.getInData(args.input, verbose=args.verbose)
 (angles, height, width) = inData.shape
 # make average reading projections one by one to avoid loading whole volume into memory
 s1d_mean_all = np.zeros((height, width))
+if args.verbose :
+    print('Computing mean of input projections...', flush=True)
 for i in tqdm.tqdm(range(1,angles-1), disable=not args.verbose):
     s1d_mean_all += inData[i,:,:]
+if args.verbose :
+    print('... Done', flush=True)
 s1d_mean_all /= (inData.shape[0] - 2)
 outWrapper = cs.OutputWrapper(args.output, inData.shape)
 
-
+if args.verbose :
+    print('Removing rings ...', flush=True)
 for i in tqdm.tqdm(range(height), disable=not args.verbose):
 
     sino_org = np.array(inData[:,i,:])
@@ -143,6 +148,8 @@ for i in tqdm.tqdm(range(height), disable=not args.verbose):
     # store
     outWrapper.put(sino, np.s_[:,i,:], flush=False)
 
+if args.verbose :
+    print('... Done', flush=True)
 
 
 

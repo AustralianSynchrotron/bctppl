@@ -72,7 +72,7 @@ inplace=false
 fromStage=0
 termStage=9999
 #forcedInp=""
-pplvariant="new"
+#pplvariant="new"
 
 allargs=""
 while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
@@ -478,219 +478,101 @@ if (( stage >= fromStage )) ; then
 fi
 
 
-ipcIn=""
-if [ "$pplvariant" == "old" ] ; then
-
-
-  # track the ball
-  bumpstage
-  trackOut="${out}${pstage}_track_"
-  if (( stage >= fromStage )) ; then
-    announceStage "tracking for jitter"
-    trackOpt="$beverboseO"
-    if [ -n "$gmask" ] ; then
-      trackOpt="$trackOpt -m ${splitOut}mask.tif "
-    fi
-    #if $jonly ; then
-    #  trackOpt="$trackOpt -J "
-    #fi
-    if needToMake "${trackOut}org.dat"  ; then
-      announceStage 1 "tracking jitter in original set"
-      execMe "$EXEPATH/trackme.py ${splitOut}org.hdf:/data -o ${trackOut}org.dat $trackOpt "
-    fi
-    if needToMake "${trackOut}sft.dat" ; then
-      announceStage 2 "tracking jitter in shifted set"
-      execMe "$EXEPATH/trackme.py ${splitOut}sft.hdf:/data -o ${trackOut}sft.dat $trackOpt "
-    fi
-    # analyze track results
-    announceStage 3 "analyzing jitter tracking"
+# find pair wise shifts
+bumpstage
+shiftsOut="${iout}${pstage}_shifts.dat"
+if (( stage >= fromStage )) ; then
+  announceStage "find pairwse shifts"
+  if needToMake "$shiftsOut" ; then
+    stFile="${iout}.stitches.txt"
+    execMe "$EXEPATH/stitch.sh -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g 0,0 -c 0  > $stFile "
+    shiftsOpt="$beverboseO"
+    shiftsOpt="$shiftsOpt -s $stFile -m ${splitOut}mask.tif"
+    execMe "$EXEPATH/pairShift.py $shiftsOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data -o $shiftsOut"
+    rm -rf "$stFile"
   fi
-  #splitWidth=$( h5ls -rf "${splitOut}org.hdf" | grep "/data" | sed "s:.* \([0-9]*\)}:\1:g" )
-  splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
-  ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
-  execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth ${trackOut}*.dat > $EXECRES"
-  read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
-  if $beverbose ; then
-    echo "Jitter amplitudes: $amplX $amplY"
-    echo "Shift: $shiftX $shiftY"
-    echo "Rotation centre deviation: $centdiv"
-    echo "True 180-deg ark (for indication only): $trueArk"
+fi
+
+
+# patch the gaps
+bumpstage
+patchOut="${iout}${pstage}_patched"
+if (( stage >= fromStage )) ; then
+  announceStage "patching gaps"
+  if needToMake "${patchOut}ForProc.hdf" "${patchOut}ForTrack.hdf" ; then
+    patchOpt="$beverboseO"
+    patchOpt="$patchOpt -m ${splitOut}mask.tif -s $shiftsOut"
+    patchOpt="$patchOpt -o ${patchOut}ForProc.hdf:/data -w ${patchOut}ForTrack.hdf:/data"
+    execMe "$EXEPATH/patchMe.py $patchOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data "
   fi
-  shiftX=$( printf "%.0f" "$shiftX" ) # rounding
-  shiftY=$( printf "%.0f" "$shiftY" ) # rounding
+  cleanUp "${splitOut}"
+fi
 
 
-  # align
-  bumpstage
-  alignOut="${iout}${pstage}_align_"
-  if (( stage >= fromStage )) ; then
-    announceStage "aligning"
+# track the ball
+bumpstage
+trackOut="${iout}${pstage}_track.dat"
+if (( stage >= fromStage )) ; then
+  announceStage "tracking the ball"
+  if needToMake "$trackOut" ; then
+    execMe "$EXEPATH/trackme.py ${patchOut}ForTrack.hdf:/data -o $trackOut $beverboseO -m 0"
+    ctas v2v "${patchOut}ForTrack.hdf:/data:0" -o .split_shape.tif
+  fi
+  cleanUp "${patchOut}ForTrack.hdf:/data"
+fi
+splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
+ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
+execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth $trackOut > $EXECRES"
+read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
+centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
+if $beverbose ; then
+  echo "Jitter amplitudes: $amplX $amplY"
+  echo "Rotation centre deviation: $centdiv"
+  echo "True 180-deg ark (for indication only): $trueArk"
+fi
+
+
+# align
+bumpstage
+alignOut="${iout}${pstage}_align"
+if (( stage >= fromStage )) ; then
+  announceStage "aligning"
+  if needToMake "${alignOut}.hdf" ; then
     alignOpt="$beverboseO"
-    alignOpt="$alignOpt -S ${amplX},${amplY} -m ${splitOut}mask.tif "
+    alignOpt="$alignOpt -S ${amplX},${amplY} -m 0 -s $trackOut"
     if $jonly ; then
       alignOpt="$alignOpt -J "
     fi
-    alignCom="$EXEPATH/build/align $alignOpt"
-    if needToMake "${alignOut}org.hdf" ; then
-      announceStage 1  "aligning original set"
-      execMe "$alignCom ${splitOut}org.hdf:/data -s ${trackOut}org.dat -o ${alignOut}org.hdf:/data"
-    fi
-    if needToMake "${alignOut}sft.hdf"  ; then
-      announceStage 2 "aligning shifted set"
-      execMe "$alignCom ${splitOut}sft.hdf:/data -s ${trackOut}sft.dat -o ${alignOut}sft.hdf:/data"
-    fi
-    cleanUp "${splitOut}"
+    execMe "$EXEPATH/align $alignOpt ${patchOut}ForProc.hdf:/data -o ${alignOut}.hdf:/data"
   fi
+  cleanUp "${patchOut}ForProc.hdf:/data"
+fi
 
 
-  # fill gaps
-  bumpstage
-  fillOut="${iout}${pstage}_fill_"
-  if (( stage >= fromStage )) ; then
-    announceStage "filling gaps"
+# fill gaps
+bumpstage
+fillOut="${iout}${pstage}_fill"
+if (( stage >= fromStage )) ; then
+  announceStage "filling gaps in sinograms"
+  if needToMake "${fillOut}.hdf" ; then
     fillOpt="$beverboseO"
     fillCom="$EXEPATH/sinogapme.py $fillOpt"
-    fillone() {
-      fI="${alignOut}${1}"
-      fO="${fillOut}${1}"
-      if needToMake "${fO}.hdf" ; then
-        announceStage "${2}" "filling gaps in ${1} set"
-        execMe "$fillCom ${fI}.hdf:/data -m ${fI}_mask.tif ${fO}.hdf:/data"
-        leftMask="${fO}_mask_left.tif"
-        if [ -e "$leftMask" ] && [ "1" != "$( convert "$leftMask" -format '%[fx:minima]' info: )" ] ; then
-          announceStage "${2}.1" "filling gaps left after sinogap"
-          execMe "ctas proj $beverboseO ${fO}.hdf:/data -o ${fO}_2.hdf:/data -M $leftMask -I AM"
-          rm "${fO}.hdf"
-          mv "${fO}_2.hdf" "${fO}.hdf"
-        fi
-      fi
-    }
-    fillone "org" 1
-    fillone "sft" 2
-    cleanUp "${alignOut}"
-  fi
-
-
-  # stitch
-  bumpstage
-  stitchOut="${iout}${pstage}_stitched.hdf"
-  if (( stage >= fromStage )) ; then
-    announceStage "stitching original and shifted sets"
-    if needToMake "$stitchOut" ; then
-      stitchOpt="$beverboseO"
-      stitchOpt="$stitchOpt -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g ${shiftX},${shiftY} -c $centdiv"
-      stitchOpt="$stitchOpt -m ${fillOut}org_mask.tif -M ${fillOut}sft_mask.tif "
-      execMe "$EXEPATH/stitch.sh $stitchOpt ${fillOut}org.hdf:/data ${fillOut}sft.hdf:/data ${stitchOut}:/data"
-    fi
-    cleanUp "${fillOut}"
-  fi
-  centdiv=0 # corrected in stitching
-
-  ipcIn="$stitchOut"
-
-
-
-else # new version
-
-
-
-  # find pair wise shifts
-  bumpstage
-  shiftsOut="${iout}${pstage}_shifts.dat"
-  if (( stage >= fromStage )) ; then
-    announceStage "pairwse shifts determination"
-    if needToMake "$shiftsOut" ; then
-      stFile="${iout}.stitches.txt"
-      execMe "$EXEPATH/stitch.sh -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g 0,0 -c 0  > $stFile "
-      shiftsOpt="$beverboseO"
-      shiftsOpt="$shiftsOpt -s $stFile -m ${splitOut}mask.tif"
-      execMe "$EXEPATH/pairShift.py $shiftsOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data -o $shiftsOut"
-      rm -rf "$stFile"
+    execMe "$fillCom ${alignOut}.hdf:/data -m ${alignOut}_mask.tif ${fillOut}.hdf:/data"
+    leftMask="${fillOut}_mask_left.tif"
+    if [ -e "$leftMask" ] && [ "1" != "$( convert "$leftMask" -format '%[fx:minima]' info: )" ] ; then
+      announceStage "1" "filling gaps left after sinogap"
+      execMe "ctas proj $beverboseO ${fillOut}.hdf:/data -o ${fillOut}_am.hdf:/data -M $leftMask -I AM"
+      rm "${fillOut}.hdf"
+      mv "${fillOut}_am.hdf" "${fillOut}.hdf"
     fi
   fi
-
-
-  # patch the gaps
-  bumpstage
-  patchOut="${iout}${pstage}_patched"
-  if (( stage >= fromStage )) ; then
-    announceStage "patching gaps"
-    if needToMake "${patchOut}ForProc.hdf" "${patchOut}ForTrack.hdf" ; then
-      patchOpt="$beverboseO"
-      patchOpt="$patchOpt -m ${splitOut}mask.tif -s $shiftsOut"
-      patchOpt="$patchOpt -o ${patchOut}ForProc.hdf:/data -w ${patchOut}ForTrack.hdf:/data"
-      execMe "$EXEPATH/patchMe.py $patchOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data "
-    fi
-    cleanUp "${splitOut}"
-  fi
-
-
-  # track the ball
-  bumpstage
-  trackOut="${iout}${pstage}_track.dat"
-  if (( stage >= fromStage )) ; then
-    announceStage "tracking the ball"
-    if needToMake "$trackOut" ; then
-      execMe "$EXEPATH/trackme.py ${patchOut}ForTrack.hdf:/data -o $trackOut $beverboseO -m 0"
-      ctas v2v "${patchOut}ForTrack.hdf:/data:0" -o .split_shape.tif
-    fi
-    cleanUp "${patchOut}ForTrack.hdf:/data"
-  fi
-  splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
-  ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
-  execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth $trackOut > $EXECRES"
-  read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
-  centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
-  if $beverbose ; then
-    echo "Jitter amplitudes: $amplX $amplY"
-    echo "Rotation centre deviation: $centdiv"
-    echo "True 180-deg ark (for indication only): $trueArk"
-  fi
-
-
-  # align
-  bumpstage
-  alignOut="${iout}${pstage}_align"
-  if (( stage >= fromStage )) ; then
-    announceStage "aligning"
-    if needToMake "${alignOut}.hdf" ; then
-      alignOpt="$beverboseO"
-      alignOpt="$alignOpt -S ${amplX},${amplY} -m 0 -s $trackOut"
-      if $jonly ; then
-        alignOpt="$alignOpt -J "
-      fi
-      execMe "$EXEPATH/align $alignOpt ${patchOut}ForProc.hdf:/data -o ${alignOut}.hdf:/data"
-    fi
-    cleanUp "${patchOut}ForProc.hdf:/data"
-  fi
-
-
-  # fill gaps
-  bumpstage
-  fillOut="${iout}${pstage}_fill"
-  if (( stage >= fromStage )) ; then
-    announceStage "filling gaps in sinograms"
-    if needToMake "${fillOut}.hdf" ; then
-      fillOpt="$beverboseO"
-      fillCom="$EXEPATH/sinogapme.py $fillOpt"
-      execMe "$fillCom ${alignOut}.hdf:/data -m ${alignOut}_mask.tif ${fillOut}.hdf:/data"
-      leftMask="${fillOut}_mask_left.tif"
-      if [ -e "$leftMask" ] && [ "1" != "$( convert "$leftMask" -format '%[fx:minima]' info: )" ] ; then
-        announceStage "1" "filling gaps left after sinogap"
-        execMe "ctas proj $beverboseO ${fillOut}.hdf:/data -o ${fillOut}_am.hdf:/data -M $leftMask -I AM"
-        rm "${fillOut}.hdf"
-        mv "${fillOut}_am.hdf" "${fillOut}.hdf"
-      fi
-    fi
-  fi
-
-  ipcIn="${fillOut}.hdf"
-
 fi
+
 
 
 # phase contrast
 bumpstage
+ipcIn="${fillOut}.hdf"
 ipcOut="${out}${pstage}_ipc.hdf"
 if (( stage >= fromStage )) ; then
   announceStage "inline phase contrast"
@@ -706,7 +588,7 @@ if (( stage >= fromStage )) ; then
   else
     if needToMake "$ipcOut" ; then
       ipcOpt="$beverboseO"
-      ipcOpt="$ipcOpt -e -d $d2b"
+      ipcOpt="$ipcOpt -e -d $d2b -p "
       if (( o2d == 0 )) ; then
         echo "No object to detector provided for phase contrast (-z option). Exiting" >&2
         exit 1
@@ -736,6 +618,7 @@ fi
 
 # ring artefact removal
 bumpstage
+fillCom="$EXEPATH/ring.py"
 ringOut="${out}${pstage}_ring.hdf"
 if (( stage >= fromStage )) ; then
   announceStage "ring artefact correction"
@@ -751,7 +634,8 @@ if (( stage >= fromStage )) ; then
   else
     if needToMake "$ringOut" ; then
       ringOpt="$beverboseO"
-      execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y ${ipcOut}:/data:y"
+      #execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y ${ipcOut}:/data:y"
+      execMe "$EXEPATH/ring.py $ringOpt ${ipcOut}:/data ${ringOut}:/data"
     fi
     cleanUp "${ipcOut}"
   fi
@@ -772,8 +656,6 @@ if (( stage >= fromStage )) ; then
   fi
   cleanUp "${ringOut}"
 fi
-
-
 
 
 
