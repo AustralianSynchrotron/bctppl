@@ -59,7 +59,7 @@ if not args.tsft :
        0,
        0,
        poptOrg[0] - (args.iwidth - 1) / 2,
-       poptOrg[2])
+       2*math.pi/poptOrg[2] - 1 )
     exit(0)
 
 

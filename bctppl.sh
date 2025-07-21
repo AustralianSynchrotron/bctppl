@@ -25,6 +25,7 @@ printhelp() {
   echo "  -f INT       First frame in original data set."
   echo "  -F INT       First frame in shifted data set."
   echo "  -e INT       Number of projections to process. Ark+1 if not given."
+  echo "  -Z INT       Fraction of total input projections (1)."
   echo "  -c SEG,SEG   Crop input image."
 #  echo "  -C SEG,SEG   Crop stitched image."
   echo "  -r FLOAT     Rotate projections (deg)."
@@ -57,7 +58,7 @@ end=""
 rotate=""
 fill=""
 binn=""
-zinn=""
+zinn=1
 o2d=0
 wav=""
 d2b=""
@@ -75,7 +76,7 @@ termStage=9999
 #pplvariant="new"
 
 allargs=""
-while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -98,6 +99,10 @@ while getopts "b:B:d:D:m:a:f:F:e:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
     e)  end=$OPTARG
         chkint "$end" "-$opt"
         chkpos "$end" "-$opt"
+        ;;
+    Z)  zinn=$OPTARG
+        chkint "$zinn" "-$opt"
+        chkpos "$zinn" "-$opt"
         ;;
     c)  cropStr=$OPTARG
         ;;
@@ -165,7 +170,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
 
   hdfEntry="/entry/data/data"
   # sample
-  listOfFiles="$(find -L "$1" -maxdepth 1 -iname 'SAMPLE*hdf')"
+  listOfFiles="$(find -L "$1" -maxdepth 1 -iname '*sample*hdf')"
   nofSamples=$(grep "hdf" -c <<< "$listOfFiles")
   if (( ! nofSamples )) ; then
     echo "No sample file(s) found in ${1}." >&2
@@ -187,7 +192,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       bgO="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
     if $beverbose ; then
-      echo "Backgrounds in original position found:" "$listOfFiles"
+      echo "Backgrounds in original position found:" $listOfFiles
     fi
   fi
   # BG sft
@@ -197,7 +202,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       bgS="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
     if $beverbose ; then
-      echo "Backgrounds in shifted position found:" "$listOfFiles"
+      echo "Backgrounds in shifted position found:" $listOfFiles
     fi
   fi
   # non-specific DF
@@ -208,7 +213,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       dfC="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
     if $beverbose ; then
-      echo "All dark fields found:" "$listOfFiles"
+      echo "All dark fields found:" $listOfFiles
     fi
   fi
   # DF org
@@ -220,7 +225,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       dfO="$dfC"
     fi
     if $beverbose ; then
-      echo "Dark fields in original position found:" "$listOfFiles"
+      echo "Dark fields in original position found:" $listOfFiles
     fi
   fi
   # DF sft
@@ -232,7 +237,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       dfS="$dfC"
     fi
     if $beverbose ; then
-      echo "Dark fields in shifted position found:" "$listOfFiles"
+      echo "Dark fields in shifted position found:" $listOfFiles
     fi
   fi
   # PPS stream
@@ -314,7 +319,7 @@ if (( firstO + ark > firstS )) ; then
 fi
 
 if [ -z "$end" ] ; then
-  end=$(( ark + 1 ))
+  end=$(( ark + zinn ))
 fi
 if (( end <= ark )) ; then
   echo "Number of projections to process is less or equal to ark: $end <= $ark." >&2
@@ -432,6 +437,17 @@ if [ -z "$gmask" ] ; then
   createMask=true
   gmask="${out}${pstage}_mask.tif"
 fi
+rinp="$inp"
+if (( zinn != 1)) ; then # dose reduction by selecting fraction of images
+  zinf="${out}${pstage}_zinn.hdf"
+  rinp="${zinf}:/data"
+  zinp="${inp}:${firstO}::${zinn}"
+  rzin=$((zinn/2))
+  ark=$(( (ark+rzin) / zinn ))
+  end=$(( (end+rzin)  / zinn ))
+  firstS=$(( (firstS - firstO + rzin ) / zinn ))
+  firstO=0
+fi
 if (( stage >= fromStage )) ; then
   announceStage "preparing"
   averageHdf2Tif "$bgO" "$bgOu"
@@ -448,7 +464,15 @@ if (( stage >= fromStage )) ; then
     execMe "convert $premask -morphology dilate square -negate ${gmask}"
     rm "$premask"
   fi
+  if (( zinn != 1)) && needToMake "$zinf" ; then
+    if $beverbose ; then
+      echo "Extracting 1/$zinn fraction of input dataset."
+    fi
+    execMe "ctas v2v $zinp $beverboseO -o ${rinp}"
+  fi
 fi
+
+
 
 
 # split into org and sft
@@ -470,9 +494,9 @@ if (( stage >= fromStage )) ; then
     splitOpt="$splitOpt $( addOpt -c "$cropStr" ) "
     splitOpt="$splitOpt $( addOpt -r "$rotate" ) "
     splitOpt="$splitOpt $( addOpt -z "$binn" ) "
-    splitOpt="$splitOpt $( addOpt -Z "$zinn" ) "
+    #splitOpt="$splitOpt $( addOpt -Z "$zinn" ) "
     splitOpt="$splitOpt $( addOpt -i "$fill" ) "
-    execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $inp $splitOut "
+    execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $rinp $splitOut "
     cp  "${splitOut}mask.tif" .split_shape.tif
   fi
 fi
@@ -524,7 +548,7 @@ splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -
 ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth $trackOut > $EXECRES"
 read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
-centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
+#centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
 if $beverbose ; then
   echo "Jitter amplitudes: $amplX $amplY"
   echo "Rotation centre deviation: $centdiv"
@@ -635,7 +659,7 @@ if (( stage >= fromStage )) ; then
     if needToMake "$ringOut" ; then
       ringOpt="$beverboseO"
       #execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y ${ipcOut}:/data:y"
-      execMe "$EXEPATH/ring.py $ringOpt ${ipcOut}:/data ${ringOut}:/data"
+      execMe "$EXEPATH/ring.py $ringOpt --correct ${ipcOut}:/data ${ringOut}:/data"
     fi
     cleanUp "${ipcOut}"
   fi
