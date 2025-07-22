@@ -17,8 +17,9 @@ printhelp() {
   echo "  -f INT       First frame in original data set."
   echo "  -F INT       First frame in shifted data set."
   echo "  -e INT       Number of projections to process."
-  echo "  -z INT       Binning over multiple input prrojections."
-  echo "  -Z INT[,INT] Binn factor(s)."
+  echo "  -s INT       Skip factor: projections are taken at given step."
+  echo "  -z INT       Angular binn factor: average of given number of input prrojections."
+  echo "  -Z INT[,INT] Spacial binn factor(s)."
   echo "  -c SEG,SEG   Crop image."
   echo "  -r FLOAT     Rotate projections."
   echo "  -i str       Type of gap fill algorithm: NO(default), NS, AT, AM"
@@ -44,7 +45,8 @@ beverbose=false
 allargs=""
 binn=""
 zinn=""
-while getopts "b:B:d:D:m:M:f:F:e:c:r:z:Z:i:t:hv" opt ; do
+skip=""
+while getopts "b:B:d:D:m:M:f:F:e:c:r:s:z:Z:i:t:hv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     b)  bgO=$OPTARG;;
@@ -69,6 +71,11 @@ while getopts "b:B:d:D:m:M:f:F:e:c:r:z:Z:i:t:hv" opt ; do
         ;;
     r)  rotate=$OPTARG
         chknum "$rotate" "-$opt"
+        ;;
+    s)  skip=$OPTARG
+        chkint "$skip" "-$opt"
+        chkpos "$skip" "-$opt"
+        skip=":$skip"
         ;;
     z)  zinn=$OPTARG
         chkint "$zinn" "-$opt"
@@ -135,8 +142,9 @@ if $beverbose ; then
 fi
 
 
+
 # original position
-org_args=" $args -o ${2}org.hdf:/data ${1}:${firstO}+${end} "
+org_args=" $args -o ${2}org.hdf:/data ${1}:${firstO}+${end}${skip} "
 if [ -n "$bgO" ] ; then
   org_args="$org_args -B $bgO "
 fi
@@ -146,7 +154,7 @@ fi
 execMe "ctas proj $org_args"
 
 # shifted position
-sft_args=" $args -o ${2}sft.hdf:/data ${1}:${firstS}+${end} "
+sft_args=" $args -o ${2}sft.hdf:/data ${1}:${firstS}+${end}${skip} "
 if [ -n "$bgS" ] ; then
   sft_args="$sft_args -B $bgS "
 fi

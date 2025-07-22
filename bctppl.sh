@@ -27,7 +27,6 @@ printhelp() {
   echo "  -e INT       Number of projections to process. Ark+1 if not given."
   echo "  -Z INT       Fraction of total input projections (1)."
   echo "  -c SEG,SEG   Crop input image."
-#  echo "  -C SEG,SEG   Crop stitched image."
   echo "  -r FLOAT     Rotate projections (deg)."
   echo "  -z FLOAT     Obect to detector distance (mm)."
   echo "  -w FLOAT     Wawelength (Angstrom)."
@@ -36,7 +35,7 @@ printhelp() {
   echo "  -R INT       Width of ring artefact filter."
   echo "  -J           Correct jitter only in vertical axis."
   echo "  -K           Keep iterim files."
-  echo "  -P           Keep clean and steached projections container."
+  echo "  -P           Keep clean and stiched projections container."
   echo "  -I           Use output folder instead of memory to store interim files."
   echo "  -S INT       Start from given stage."
   echo "  -T INT       Terminate after given stage."
@@ -264,24 +263,30 @@ chkhdf "$inp"
 # Prepare output and log
 
 out=""
+outDest="${2}"
 if [ -n "${2}" ] ; then
-  out="${2}/"
+  if [ "${outDest: -4}" == ".hdf" ] ; then
+    out="$(dirname "${2}")/"
+  else
+    out="${2}/"
+  fi
   mkdir -p "${out}"
 else
   out="./"
+  outDest="./"
 fi
 iout=""
 if $inplace ; then
   iout="${out}"
 else
   iout="/dev/shm/bctppl/"
-  if ! $skipExisting ; then
+  if ! $skipExisting  &&  ! ((fromStage)) ; then
     rm -rf "$iout" # to clean up after any previous left overs
   fi
   mkdir -p "$iout"
 fi
 LOGFILE="${out}.ppl.log"
-EXECRES="${out}.res"
+EXECRES="${iout}.res"
 touch "$LOGFILE"
 echo "# In \"$PWD\"" >> "$LOGFILE"
 echo "# $(realpath "$0") $allOpts " >> "$LOGFILE"
@@ -386,6 +391,13 @@ needToMake() {
       cp "$beverboseO" "${out}/${base}" "$file"
       continue
     fi
+    if [ -e "${iout}/${base}" ] ; then
+      if [ $beverbose ] ; then
+        echo "Found existing ${iout}/${base}. Copying to $file."
+      fi
+      cp "$beverboseO" "${iout}/${base}" "$file"
+      continue
+    fi
     return 0
   done
   return 1
@@ -423,23 +435,22 @@ cleanUp() {
 
 
 
-
-# Actual p[rocessing starts from here
+# Actual processing starts from here
 
 # prepare averaged BG's
 bumpstage
-bgOu="${out}${pstage}_bg_org.tif"
-bgSu="${out}${pstage}_bg_sft.tif"
-dfOu="${out}${pstage}_df_org.tif"
-dfSu="${out}${pstage}_df_sft.tif"
+bgOu="${iout}${pstage}_bg_org.tif"
+bgSu="${iout}${pstage}_bg_sft.tif"
+dfOu="${iout}${pstage}_df_org.tif"
+dfSu="${iout}${pstage}_df_sft.tif"
 createMask=false
 if [ -z "$gmask" ] ; then
   createMask=true
-  gmask="${out}${pstage}_mask.tif"
+  gmask="${iout}${pstage}_mask.tif"
 fi
 rinp="$inp"
 if (( zinn != 1)) ; then # dose reduction by selecting fraction of images
-  zinf="${out}${pstage}_zinn.hdf"
+  zinf="${iout}${pstage}_zinn.hdf"
   rinp="${zinf}:/data"
   zinp="${inp}:${firstO}::${zinn}"
   rzin=$((zinn/2))
@@ -459,7 +470,7 @@ if (( stage >= fromStage )) ; then
       echo "No mask provided (-m option)."
       echo "Creating mask from background image \"$bgOu\" and save to \"$gmask\"."
     fi
-    premask="${out}.premask.tif"
+    premask="${iout}.premask.tif"
     execMe "ctas v2v $bgOu -i 8 -m 65534 -M 65535 -o $premask"
     execMe "convert $premask -morphology dilate square -negate ${gmask}"
     rm "$premask"
@@ -498,6 +509,9 @@ if (( stage >= fromStage )) ; then
     splitOpt="$splitOpt $( addOpt -i "$fill" ) "
     execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $rinp $splitOut "
     cp  "${splitOut}mask.tif" .split_shape.tif
+  fi
+  if (( zinn != 1)) ; then
+    cleanUp "${zinf}"
   fi
 fi
 
@@ -542,7 +556,7 @@ if (( stage >= fromStage )) ; then
     execMe "$EXEPATH/trackme.py ${patchOut}ForTrack.hdf:/data -o $trackOut $beverboseO -m 0"
     ctas v2v "${patchOut}ForTrack.hdf:/data:0" -o .split_shape.tif
   fi
-  cleanUp "${patchOut}ForTrack.hdf:/data"
+  cleanUp "${patchOut}ForTrack.hdf"
 fi
 splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
@@ -552,7 +566,7 @@ read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
 if $beverbose ; then
   echo "Jitter amplitudes: $amplX $amplY"
   echo "Rotation centre deviation: $centdiv"
-  echo "True 180-deg ark (for indication only): $trueArk"
+  echo "Tracked 180-deg ark (for indication only): $trueArk"
 fi
 
 
@@ -597,7 +611,7 @@ fi
 # phase contrast
 bumpstage
 ipcIn="${fillOut}.hdf"
-ipcOut="${out}${pstage}_ipc.hdf"
+ipcOut="${iout}${pstage}_ipc.hdf"
 if (( stage >= fromStage )) ; then
   announceStage "inline phase contrast"
   if [ -z "$d2b" ] ; then # no IPC
@@ -643,7 +657,7 @@ fi
 # ring artefact removal
 bumpstage
 fillCom="$EXEPATH/ring.py"
-ringOut="${out}${pstage}_ring.hdf"
+ringOut="${iout}${pstage}_ring.hdf"
 if (( stage >= fromStage )) ; then
   announceStage "ring artefact correction"
   if [ -z "$ring" ] ; then # no ring removal
@@ -668,7 +682,7 @@ fi
 
 # CT
 bumpstage
-ctOut="${out}${pstage}_rec.hdf"
+ctOut="${iout}${pstage}_rec.hdf"
 if (( stage >= fromStage )) ; then
   announceStage "CT reconstruction"
   if needToMake "$ctOut" ; then
@@ -682,6 +696,16 @@ if (( stage >= fromStage )) ; then
 fi
 
 
+# moving results and cleanup
+announceStage "Moving result"
+if $cleanup ; then
+  execMe mv "${ctOut}" "$outDest"
+else
+  execMe cp "${ctOut}" "$outDest"
+fi
+if $cleanup  &&  [ "$iout" == "/dev/shm/bctppl/" ] ; then
+  rm -rf "$iout"
+fi
 
 
 if (( stage < fromStage )) ; then
