@@ -448,17 +448,6 @@ if [ -z "$gmask" ] ; then
   createMask=true
   gmask="${iout}${pstage}_mask.tif"
 fi
-rinp="$inp"
-if (( zinn != 1)) ; then # dose reduction by selecting fraction of images
-  zinf="${iout}${pstage}_zinn.hdf"
-  rinp="${zinf}:/data"
-  zinp="${inp}:${firstO}::${zinn}"
-  rzin=$((zinn/2))
-  ark=$(( (ark+rzin) / zinn ))
-  end=$(( (end+rzin)  / zinn ))
-  firstS=$(( (firstS - firstO + rzin ) / zinn ))
-  firstO=0
-fi
 if (( stage >= fromStage )) ; then
   announceStage "preparing"
   averageHdf2Tif "$bgO" "$bgOu"
@@ -474,12 +463,6 @@ if (( stage >= fromStage )) ; then
     execMe "ctas v2v $bgOu -i 8 -m 65534 -M 65535 -o $premask"
     execMe "convert $premask -morphology dilate square -negate ${gmask}"
     rm "$premask"
-  fi
-  if (( zinn != 1)) && needToMake "$zinf" ; then
-    if $beverbose ; then
-      echo "Extracting 1/$zinn fraction of input dataset."
-    fi
-    execMe "ctas v2v $zinp $beverboseO -o ${rinp}"
   fi
 fi
 
@@ -505,15 +488,19 @@ if (( stage >= fromStage )) ; then
     splitOpt="$splitOpt $( addOpt -c "$cropStr" ) "
     splitOpt="$splitOpt $( addOpt -r "$rotate" ) "
     splitOpt="$splitOpt $( addOpt -z "$binn" ) "
-    #splitOpt="$splitOpt $( addOpt -Z "$zinn" ) "
+    splitOpt="$splitOpt $( addOpt -s "$zinn" ) "
     splitOpt="$splitOpt $( addOpt -i "$fill" ) "
-    execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $rinp $splitOut "
+    execMe "$EXEPATH/split.sh  -f $firstO -F $firstS -e $end $splitOpt $inp $splitOut "
     cp  "${splitOut}mask.tif" .split_shape.tif
   fi
-  if (( zinn != 1)) ; then
-    cleanUp "${zinf}"
-  fi
 fi
+if (( zinn != 1)) ; then # dose reduction by selecting fraction of images
+  rzin=$((zinn/2))
+  ark=$(( ( ark + rzin ) / zinn ))
+  firstS=$(( (firstS - firstO + rzin ) / zinn ))
+  firstO=0
+fi
+
 
 
 # find pair wise shifts
@@ -583,7 +570,7 @@ if (( stage >= fromStage )) ; then
     fi
     execMe "$EXEPATH/align $alignOpt ${patchOut}ForProc.hdf:/data -o ${alignOut}.hdf:/data"
   fi
-  cleanUp "${patchOut}ForProc.hdf:/data"
+  cleanUp "${patchOut}ForProc.hdf"
 fi
 
 
@@ -604,6 +591,7 @@ if (( stage >= fromStage )) ; then
       mv "${fillOut}_am.hdf" "${fillOut}.hdf"
     fi
   fi
+  cleanUp "${alignOut}.hdf"
 fi
 
 
@@ -699,9 +687,9 @@ fi
 # moving results and cleanup
 announceStage "Moving result"
 if $cleanup ; then
-  execMe mv "${ctOut}" "$outDest"
+  execMe "mv ${ctOut} $outDest"
 else
-  execMe cp "${ctOut}" "$outDest"
+  execMe "cp ${ctOut} $outDest"
 fi
 if $cleanup  &&  [ "$iout" == "/dev/shm/bctppl/" ] ; then
   rm -rf "$iout"

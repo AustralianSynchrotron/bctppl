@@ -27,7 +27,7 @@ args = parser.parse_args()
 
 def fit_as_sin(dat, xdat) :
     def sin_func(x, a, b, c, d):
-        return a + b * np.sin(x * math.pi / (c-1) + d)
+        return a + b * np.sin(x * c + d)
     delta = dat.max() - dat.min()
     if delta == 0 :
         return dat
@@ -36,9 +36,10 @@ def fit_as_sin(dat, xdat) :
     meanDat = dat.mean()
     dat_norm = (dat - meanDat) / delta # normalize for fitting
     popt, _ = curve_fit(sin_func, x_norm, dat_norm,
-                        p0 = [0, 0.5, args.ark, 0],
-                        bounds=([-1 , 0, args.ark / 1.1,         0],
-                                [ 1 , 1, args.ark * 1.1, 2*math.pi]))
+                        p0 = [0, 0.5, math.pi/args.ark, 0],
+                        bounds=([-1 , 0, 0,         0],
+                                [ 1 , 1, 2*math.pi/args.ark, 2*math.pi])
+                        )
     popt[0] = popt[0] * delta + meanDat
     popt[1] *= delta
     return popt
@@ -50,6 +51,7 @@ hOrg = resOrg[:,3]
 hOrg += ( args.kwidth - 1 ) / 2
 frameNofsOrg = np.linspace(0, resOrg.shape[0]-1, resOrg.shape[0])
 poptOrg = fit_as_sin(hOrg, frameNofsOrg)
+print(poptOrg[0])
 
 if not args.tsft :
     print(
@@ -58,7 +60,7 @@ if not args.tsft :
        0,
        0,
        poptOrg[0] - (args.iwidth - 1) / 2,
-       poptOrg[2] )
+       2 * math.pi / poptOrg[2] )
     exit(0)
 
 
