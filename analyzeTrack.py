@@ -40,11 +40,11 @@ def fit_as_sin(dat, xdat) :
                         p0 = [0, 0.5, math.pi, 0],
                         bounds=([-1 , 0, math.pi / 1.1,         0],
                                 [ 1 , 1, math.pi * 1.1, 2*math.pi]))
-    print(popt)
+    #print(popt)
     popt[0] = popt[0] * delta + meanDat
     popt[1] *= delta
     popt[2] = popt[2] * xsize / math.pi + 1
-    print(popt)
+    #print(popt)
     return popt
 
 
