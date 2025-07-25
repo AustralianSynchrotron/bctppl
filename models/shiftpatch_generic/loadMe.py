@@ -232,10 +232,7 @@ dataMeanNorm = (0.5,0.5,0,0,0,0) # masks not to be normalized
 imageFwdTransforms = transforms.Normalize(mean=(0.5,0.5,0,0), std=(1))
 imageInvTransforms = transforms.Normalize(mean=(2.0,2.0,0,0), std=(1))
 
-#modelPath = "/home/imbl/usr/src/shiftpatch/model_0_gen.pt"
-#modelPath = "/home/imbl/usr/src/shiftpatch/saves/delta_0p3_tmp/model_gen.pt"
-modelPath = "/home/imbl/usr/src/shiftpatch/saves/pureMSE/model_gen.pt"
-#modelPath = "/home/imbl/usr/src/shiftpatch/saves/square_0p3/model_gen.pt"
+modelPath = os.path.join( os.path.dirname(os.path.realpath(__file__)), "model_gen.pt")
 generator = None
 
 def process(images) :

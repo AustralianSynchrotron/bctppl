@@ -30,6 +30,7 @@ except KeyError:
 except:
     pass
 cs.device = device
+#_ = model.process(torch.zeros((1),device=cs.device))
 
 torch.set_grad_enabled(False)
 
