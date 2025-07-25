@@ -37,11 +37,14 @@ def fit_as_sin(dat, xdat) :
     meanDat = dat.mean()
     dat_norm = (dat - meanDat) / delta # normalize for fitting
     popt, _ = curve_fit(sin_func, x_norm, dat_norm,
-                        #p0 = [0, 0, math.pi, 0],
-                        bounds=([-1 , 0, 0,         0],
-                                [ 1 , 1, 2*math.pi, 2*math.pi]))
+                        p0 = [0, 0.5, math.pi, 0],
+                        bounds=([-1 , 0, math.pi / 1.1,         0],
+                                [ 1 , 1, math.pi * 1.1, 2*math.pi]))
+    print(popt)
     popt[0] = popt[0] * delta + meanDat
     popt[1] *= delta
+    popt[2] = popt[2] * xsize / math.pi + 1
+    print(popt)
     return popt
 
 
@@ -59,7 +62,7 @@ if not args.tsft :
        0,
        0,
        poptOrg[0] - (args.iwidth - 1) / 2,
-       2*math.pi/poptOrg[2] - 1 )
+       poptOrg[2] )
     exit(0)
 
 
