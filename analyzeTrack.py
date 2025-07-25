@@ -12,7 +12,8 @@ parser.add_argument('torg', type=str, default="",
 parser.add_argument('tsft', type=str, default="", nargs='?',
                     help='Results of tracking in shifted position.')
 parser.add_argument('-a', '--ark', type=int, default="",
-                    help='Number of steps to cover 180deg ark.')
+                    help='Number of steps to cover 180deg ark.'
+                         ' Ignored for single input.')
 parser.add_argument('-s', '--sft', type=int, default=0,
                     help='Distance between first frames in shifted and original positions.'
                          ' Ignored for single input.')
@@ -27,7 +28,7 @@ args = parser.parse_args()
 
 def fit_as_sin(dat, xdat) :
     def sin_func(x, a, b, c, d):
-        return a + b * np.sin(x * c + d)
+        return a + b * np.sin(c*x+d)
     delta = dat.max() - dat.min()
     if delta == 0 :
         return dat
@@ -36,10 +37,9 @@ def fit_as_sin(dat, xdat) :
     meanDat = dat.mean()
     dat_norm = (dat - meanDat) / delta # normalize for fitting
     popt, _ = curve_fit(sin_func, x_norm, dat_norm,
-                        p0 = [0, 0.5, math.pi/args.ark, 0],
+                        #p0 = [0, 0, math.pi, 0],
                         bounds=([-1 , 0, 0,         0],
-                                [ 1 , 1, 2*math.pi/args.ark, 2*math.pi])
-                        )
+                                [ 1 , 1, 2*math.pi, 2*math.pi]))
     popt[0] = popt[0] * delta + meanDat
     popt[1] *= delta
     return popt
@@ -51,7 +51,6 @@ hOrg = resOrg[:,3]
 hOrg += ( args.kwidth - 1 ) / 2
 frameNofsOrg = np.linspace(0, resOrg.shape[0]-1, resOrg.shape[0])
 poptOrg = fit_as_sin(hOrg, frameNofsOrg)
-print(poptOrg[0])
 
 if not args.tsft :
     print(
@@ -60,7 +59,7 @@ if not args.tsft :
        0,
        0,
        poptOrg[0] - (args.iwidth - 1) / 2,
-       2 * math.pi / poptOrg[2] )
+       2*math.pi/poptOrg[2] - 1 )
     exit(0)
 
 
