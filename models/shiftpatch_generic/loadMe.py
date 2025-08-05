@@ -233,6 +233,7 @@ imageFwdTransforms = transforms.Normalize(mean=(0.5,0.5,0,0), std=(1))
 imageInvTransforms = transforms.Normalize(mean=(2.0,2.0,0,0), std=(1))
 
 modelPath = os.path.join( os.path.dirname(os.path.realpath(__file__)), "model_gen.pt")
+print(modelPath)
 generator = None
 
 def process(images) :

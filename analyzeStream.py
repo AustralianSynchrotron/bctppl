@@ -26,7 +26,7 @@ if badline :
 data = np.array(data)
 
 firstFrame = np.where( np.logical_and (data[:,0] != data[0,0], data[:,0]>0) )[0][0] - 1
-lastFrame = np.where(data[:,0] == data[-1,0])[0][0] + 1
+lastFrame = np.where(data[firstFrame:,0] == data[-1,0])[0][0] + 1
 data = data[firstFrame:lastFrame,:]
 points = data.shape[0]
 uniqData = []

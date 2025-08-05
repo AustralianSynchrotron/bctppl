@@ -105,6 +105,7 @@ def fillSinogram(sinogram) :
     sinoCutStep = gapW
     lastStart = sinoL - blockH
     nofBlocks, lastBlock = divmod(lastStart, sinoCutStep)
+    nofBlocks += 1
     totBlocks = nofBlocks + bool(lastBlock)
     modelIn = torch.empty( ( totBlocks , 1 , *ssh ), device=device )
     for block in range(nofBlocks) :
@@ -117,14 +118,14 @@ def fillSinogram(sinogram) :
     ])
     modelIn = mytransforms(modelIn)
 
-    modelIn[ -1, 0, ... ] = modelIn[ -1, 0, ... ].flip(dims=(-2,)) # to get rid of the deffect in the end
+    #modelIn[ -1, 0, ... ] = modelIn[ -1, 0, ... ].flip(dims=(-2,)) # to get rid of the deffect in the end
     results = torch.zeros( ( totBlocks , 1 , *gapSh ), device=device )
     batchSize = min(maxBatchSize, totBlocks) if maxBatchSize else totBlocks
     with torch.no_grad() :
         for batch in range(0, totBlocks, batchSize) :
             results[ batch:batch+batchSize, ... ] = generator.generatePatches(modelIn[batch:batch+batchSize,...])
         #results = generator.generatePatches(modelIn)
-    results[ -1, 0, ... ] = results[ -1, 0, ... ].flip(dims=(-2,)) # to flip back
+    #results[ -1, 0, ... ] = results[ -1, 0, ... ].flip(dims=(-2,)) # to flip back
 
     if lastBlock :
         newLast = torch.zeros(gapSh, device=device)
@@ -133,10 +134,10 @@ def fillSinogram(sinogram) :
         results[-1,0,...] = newLast
     preBlocks = torch.zeros((4,1,*gapSh), device=device)
     pstBlocks = torch.zeros((4,1,*gapSh), device=device)
-    for curs in range(4) :
-        preBlocks[ -curs-1 , 0 , sinoCutStep*(curs+1) :  , : ] \
-            = results[ 0 , 0 , : -sinoCutStep*(curs+1) , : ]
-        pstBlocks[ curs , 0 , : (-sinoCutStep*curs) if curs else (blockH+1) , : ] \
+    for curs in range(1,5) :
+        preBlocks[ -curs , 0 , sinoCutStep*curs :  , : ] \
+            = results[ 0 , 0 , : -sinoCutStep*curs , : ]
+        pstBlocks[ curs-1 , 0 , : (-sinoCutStep*curs) , : ] \
             = results[ -1 , 0 , sinoCutStep*curs : , : ]
     resultsPatched = torch.cat( (preBlocks, results, pstBlocks), dim=0 )
 
@@ -181,6 +182,7 @@ if args.verbose :
 
 pbar = tqdm.tqdm(total=fsh[-2]) if args.verbose else None
 for curSl in range(fsh[-2]):
+#for curSl in range(420,430):
 
     inSinogram = torch.tensor(inData[:,curSl,:], device=model.TCfg.device)
     sinoMask =  torch.where( inSinogram.prod(dim=0) == 0 , 0, 1 ) if mask is None else mask[curSl,:]
