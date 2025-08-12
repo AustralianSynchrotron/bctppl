@@ -126,7 +126,7 @@ while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
         ;;
     R)  ring=$OPTARG
         chkint "$ring" "-$opt"
-        chkpos "$ring" "-$opt"
+        #chkpos "$ring" "-$opt"
         ;;
     I)  inplace=true;;
     J)  jonly=true;;
@@ -420,14 +420,14 @@ averageHdf2Tif () {
 cleanUp() {
   if $cleanup ; then
     if $beverbose ; then
-      echo "Cleaning up:" "${1}"*
+      echo "Cleaning up in the background:" "${1}"*
     fi
-    rm -rf "${1}"*
+    rm -rf "${1}"* &
   elif ! $inplace ; then
     if $beverbose ; then
-      echo "Moving interim volumes to keep in ${out}:" "${1}"*
+      echo "Moving interim volumes in the background to keep in ${out}:" "${1}"*
     fi
-    mv "${1}"* "${out}"
+    mv "${1}"* "${out}" &
   fi
 }
 
@@ -660,10 +660,17 @@ if (( stage >= fromStage )) ; then
   else
     if needToMake "$ringOut" ; then
       ringOpt="$beverboseO"
-      #execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y ${ipcOut}:/data:y"
+      # first ring removal algorithm (from Ashkan)
       execMe "$EXEPATH/ring.py $ringOpt --correct ${ipcOut}:/data ${ringOut}:/data"
+      # second ring removal algorithm (from ctas), applied only to sinogapped regions
+      if (( $ring > 0 )) ; then
+        execMe "mv  ${ringOut}  ${ringOut}.hdf"
+        execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y -m ${alignOut}_mask.tif  ${ringOut}.hdf:/data:y "
+        rm  "${ringOut}.hdf"
+      fi
     fi
     cleanUp "${ipcOut}"
+    #cleanUp "${alignOut}_mask.tif"
   fi
 fi
 
@@ -700,6 +707,10 @@ if (( stage < fromStage )) ; then
   echo "Error! Start stage $fromStage is greater than the last stage $stage." >&2
   exit 1
 fi
+if $beverbose ; then
+  echo "Waiting for background jobs to complete ... "
+fi
+fg
 if $beverbose ; then
   echo
   echo "All done."
