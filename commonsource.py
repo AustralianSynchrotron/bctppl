@@ -67,7 +67,7 @@ def addToHDF(filename, containername, data) :
 def residesInMemory(hdfName) :
     mmapPrefixes = ["/dev/shm",]
     if "CTAS_MMAP_PATH" in os.environ :
-        mmapPrefixes.append[os.environ["CTAS_MMAP_PATH"].split(':')]
+        mmapPrefixes.extend(os.environ["CTAS_MMAP_PATH"].split(':'))
     hdfName = os.path.realpath(hdfName)
     for mmapPrefix in mmapPrefixes :
         if hdfName.startswith(mmapPrefix) :

@@ -233,6 +233,7 @@ imageFwdTransforms = transforms.Normalize(mean=(0.5,0.5,0,0), std=(1))
 imageInvTransforms = transforms.Normalize(mean=(2.0,2.0,0,0), std=(1))
 
 modelPath = os.path.join( os.path.dirname(os.path.realpath(__file__)), "model_gen.pt")
+
 print(modelPath)
 generator = None
 
@@ -244,12 +245,13 @@ def process(images) :
         generator = generator.to(images.device)
         generator = generator.eval()
     with torch.no_grad() :
-        ppres, ppinfo = generator.preProc(((images,None)))
-        ppres = generator.postProc(ppres[0], ppinfo)
+        #ppres, ppinfo = generator.preProc(((images,None)))
+        #ppres = generator.postProc(ppres[0], ppinfo)
+        #res = ppres
         nnres = generator.forward((images,None))
-        #res=nnres
-        resRat = 2/3
-        res = resRat * nnres + (1-resRat) * ppres
+        res=nnres
+        #resRat = 2/3
+        #res = resRat * nnres + (1-resRat) * ppres
     return res
 
 

@@ -5,6 +5,7 @@ export EXEPATH="$(dirname "$(realpath "$0")" )"
 source "$EXEPATH/commonsource.sh"
 LOCALCFG="$EXEPATH/.local.cfg"
 if [ -e "$LOCALCFG" ] ; then
+  # shellcheck disable=SC1090
   source "$LOCALCFG"
   export CUDA_VISIBLE_DEVICES
 fi
@@ -150,6 +151,18 @@ done
 shift $((OPTIND-1))
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # Check and modify inputs
 
 # Deal with input path
@@ -191,6 +204,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       bgO="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
     if $beverbose ; then
+      # shellcheck disable=SC2086
       echo "Backgrounds in original position found:" $listOfFiles
     fi
   fi
@@ -201,6 +215,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       bgS="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
     if $beverbose ; then
+      # shellcheck disable=SC2086
       echo "Backgrounds in shifted position found:" $listOfFiles
     fi
   fi
@@ -212,6 +227,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       dfC="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
     if $beverbose ; then
+      # shellcheck disable=SC2086
       echo "All dark fields found:" $listOfFiles
     fi
   fi
@@ -224,6 +240,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       dfO="$dfC"
     fi
     if $beverbose ; then
+      # shellcheck disable=SC2086
       echo "Dark fields in original position found:" $listOfFiles
     fi
   fi
@@ -236,6 +253,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       dfS="$dfC"
     fi
     if $beverbose ; then
+      # shellcheck disable=SC2086
       echo "Dark fields in shifted position found:" $listOfFiles
     fi
   fi
@@ -306,7 +324,7 @@ if [ -z "$ark" ] ; then
   exit 1
 fi
 if ! [ "$ark" -eq "$ark" ] 2>/dev/null ; then # not an integer: stream file assumed
-  # try to derive it from stram.txt
+  # try to derive it from stream.txt
   streamFile="$ark"
   #cleanStream="00_stream.dat"
   #sedFiler='s:.*FrameNumber=\"\([^\"]*\)\".*Angle=\"\([^\"]*\)\".*:\1 \2:g'
@@ -435,6 +453,19 @@ cleanUp() {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Actual processing starts from here
 
 # prepare averaged BG's
@@ -548,6 +579,7 @@ fi
 splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
 execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth $trackOut > $EXECRES"
+# shellcheck disable=SC2034
 read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
 #centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
 if $beverbose ; then
@@ -663,7 +695,7 @@ if (( stage >= fromStage )) ; then
       # first ring removal algorithm (from Ashkan)
       execMe "$EXEPATH/ring.py $ringOpt --correct ${ipcOut}:/data ${ringOut}:/data"
       # second ring removal algorithm (from ctas), applied only to sinogapped regions
-      if (( $ring > 0 )) ; then
+      if (( ring > 0 )) ; then
         execMe "mv  ${ringOut}  ${ringOut}.hdf"
         execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y -m ${alignOut}_mask.tif  ${ringOut}.hdf:/data:y "
         rm  "${ringOut}.hdf"
@@ -703,6 +735,7 @@ if $cleanup  &&  [ "$iout" == "/dev/shm/bctppl/" ] ; then
 fi
 
 
+# Final checks
 if (( stage < fromStage )) ; then
   echo "Error! Start stage $fromStage is greater than the last stage $stage." >&2
   exit 1

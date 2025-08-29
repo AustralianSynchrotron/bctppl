@@ -64,9 +64,9 @@ face = dataO.shape[-2:]
 if dataS.shape[-2:] != face :
     raise Exception( "Error! Input stacks have different sizes."
                     f" {args.original}: {dataO.shape} and {args.shifted} :{dataS.shape}.")
-maskO = cs.loadImage(args.mask[0]) if len(args.mask) else np.ones(face)
+maskO = cs.loadImage(args.mask[0], face) if len(args.mask) else np.ones(face)
 maskO = cs.stretchImage(maskO)
-maskS = cs.loadImage(args.mask[1]) if len(args.mask) > 1 else maskO
+maskS = cs.loadImage(args.mask[1], face) if len(args.mask) > 1 else maskO
 maskS = cs.stretchImage(maskS)
 maskO = torch.tensor(maskO, device=cs.device)
 maskS = torch.tensor(maskS, device=cs.device)
