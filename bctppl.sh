@@ -35,6 +35,7 @@ printhelp() {
   echo "  -i FLOAT     Delta to beta ratio for phase retreival."
   echo "  -R INT       Width of ring artefact filter."
   echo "  -J           Correct jitter only in vertical axis."
+  echo "  -N           Apply metal artefact metal artifact reduction."
   echo "  -K           Keep iterim files."
   echo "  -P           Keep clean and stiched projections container."
   echo "  -I           Use output folder instead of memory to store interim files."
@@ -72,11 +73,12 @@ keepClean=false
 inplace=false
 fromStage=0
 termStage=9999
+applyNmar=false
 #forcedInp=""
 #pplvariant="new"
 
 allargs=""
-while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:R:NIKPJS:T:Ehv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -129,6 +131,7 @@ while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:R:IKPJS:T:Ehv" opt ; do
         chkint "$ring" "-$opt"
         #chkpos "$ring" "-$opt"
         ;;
+    N)  applyNmar=true;;
     I)  inplace=true;;
     J)  jonly=true;;
     S)  fromStage=$OPTARG
@@ -707,6 +710,34 @@ if (( stage >= fromStage )) ; then
 fi
 
 
+
+# NMAR
+bumpstage
+nmarOut="${iout}${pstage}_nmar.hdf"
+if (( stage >= fromStage )) ; then
+  announceStage "metal artifact reduction"
+  if ! $applyNmar ; then # no NMAR
+    if $beverbose ; then
+      echo "Skipping this stage because no NMAR requested (-N option)."
+    fi
+    if $cleanup ; then
+      mv "$ringOut" "$nmarOut"
+    else
+      ln -s "$ringOut" "$nmarOut"
+    fi
+  else
+    nmarOpt="--verbose 1 --full-gpu 0 --log-transform 0"
+    nmarOpt="$nmarOpt $( addOpt --ang-step "$step" )"
+    nmarOpt="$nmarOpt $( addOpt --cor-shift "$centdiv" )"
+    nmarOpt="$nmarOpt $( addOpt --pixel-size "$pix" )"
+    nmarOpt="$nmarOpt $( addOpt --wavelength "$wav" )"
+    execMe "nmar $nmarOpt ${ipcOut} -o ${nmarOut}"
+    cleanUp "${ringOut}"
+  fi
+fi
+
+
+
 # CT
 bumpstage
 ctOut="${iout}${pstage}_rec.hdf"
@@ -714,10 +745,10 @@ if (( stage >= fromStage )) ; then
   announceStage "CT reconstruction"
   if needToMake "$ctOut" ; then
     ctOpt="$beverboseO"
-    ctOpt="$ctOpt $( addOpt -r "$pix" ) "
-    ctOpt="$ctOpt $( addOpt -w "$wav" ) "
-    step=$(echo "scale=8 ; 180 / $ark " | bc )
-    execMe "ctas ct $ctOpt -k a -a $step -c $centdiv ${ringOut}:/data:y -o ${ctOut}:/data"
+      ctOpt="$ctOpt $( addOpt -r "$pix" ) "
+      ctOpt="$ctOpt $( addOpt -w "$wav" ) "
+      step=$(echo "scale=8 ; 180 / $ark " | bc )
+      execMe "ctas ct $ctOpt -k a -a $step -c $centdiv ${ringOut}:/data:y -o ${ctOut}:/data"
   fi
   cleanUp "${ringOut}"
 fi
