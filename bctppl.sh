@@ -34,6 +34,7 @@ printhelp() {
   echo "  -p FLOAT     Pixel size (mum)."
   echo "  -i FLOAT     Delta to beta ratio for phase retreival."
   echo "  -R INT       Width of ring artefact filter."
+  echo "  -C FLOAT     Use this rotation centre instead of automatically calculated."
   echo "  -J           Correct jitter only in vertical axis."
   echo "  -N           Apply metal artefact metal artifact reduction."
   echo "  -K           Keep iterim files."
@@ -74,11 +75,12 @@ inplace=false
 fromStage=0
 termStage=9999
 applyNmar=false
+true_centdiv=""
 #forcedInp=""
 #pplvariant="new"
 
 allargs=""
-while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:R:NIKPJS:T:Ehv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:C:R:NIKPJS:T:Ehv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -130,6 +132,9 @@ while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:R:NIKPJS:T:Ehv" opt ; do
     R)  ring=$OPTARG
         chkint "$ring" "-$opt"
         #chkpos "$ring" "-$opt"
+        ;;
+    C)  true_centdiv=$OPTARG
+        chknum "$true_centdiv" "-$opt"
         ;;
     N)  applyNmar=true;;
     I)  inplace=true;;
@@ -586,9 +591,16 @@ execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidt
 read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
 #centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
 if $beverbose ; then
+  trueCD=""
+  if [ -n "$true_centdiv" ] ; then
+    trueCD="Will use user provided: $true_centdiv."
+  fi
   echo "Jitter amplitudes: $amplX $amplY"
-  echo "Rotation centre deviation: $centdiv"
+  echo "Rotation centre deviation: ${centdiv}. $trueCD"
   echo "Tracked 180-deg ark (for indication only): $trueArk"
+fi
+if [ -n "$true_centdiv" ] ; then
+  centdiv="$true_centdiv"
 fi
 
 
@@ -694,6 +706,7 @@ if (( stage >= fromStage )) ; then
     fi
   else
     if needToMake "$ringOut" ; then
+
       ringOpt="$beverboseO"
       # first ring removal algorithm (from Ashkan)
       execMe "$EXEPATH/ring.py $ringOpt --correct ${ipcOut}:/data ${ringOut}:/data"
@@ -726,12 +739,14 @@ if (( stage >= fromStage )) ; then
       ln -s "$ringOut" "$nmarOut"
     fi
   else
-    nmarOpt="--verbose 1 --full-gpu 0 --log-transform 0"
+    nmarOpt=" --verbose 1 --full-gpu 0 --slice-chunk 1000 "
+    #nmarOpt="$nmarOpt $( addOpt --log-transform 0 )"
     nmarOpt="$nmarOpt $( addOpt --ang-step "$step" )"
     nmarOpt="$nmarOpt $( addOpt --cor-shift "$centdiv" )"
     nmarOpt="$nmarOpt $( addOpt --pixel-size "$pix" )"
     nmarOpt="$nmarOpt $( addOpt --wavelength "$wav" )"
-    execMe "nmar $nmarOpt ${ipcOut} -o ${nmarOut}"
+    nmarOpt="$nmarOpt $( addOpt --metal 2e-10 )"
+    execMe "nmar $nmarOpt ${ipcOut} ${nmarOut}"
     cleanUp "${ringOut}"
   fi
 fi
@@ -748,7 +763,7 @@ if (( stage >= fromStage )) ; then
       ctOpt="$ctOpt $( addOpt -r "$pix" ) "
       ctOpt="$ctOpt $( addOpt -w "$wav" ) "
       step=$(echo "scale=8 ; 180 / $ark " | bc )
-      execMe "ctas ct $ctOpt -k a -a $step -c $centdiv ${ringOut}:/data:y -o ${ctOut}:/data"
+      execMe "ctas ct $ctOpt -k a -a $step -c $centdiv ${nmarOut}:/data:y -o ${ctOut}:/data"
   fi
   cleanUp "${ringOut}"
 fi
