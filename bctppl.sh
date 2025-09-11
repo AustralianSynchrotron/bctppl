@@ -1,7 +1,8 @@
 #!/bin/bash
 
 allOpts="$*"
-export EXEPATH="$(dirname "$(realpath "$0")" )"
+EXEPATH="$(dirname "$(realpath "$0")" )"
+export EXEPATH
 source "$EXEPATH/commonsource.sh"
 LOCALCFG="$EXEPATH/.local.cfg"
 if [ -e "$LOCALCFG" ] ; then
@@ -36,7 +37,7 @@ printhelp() {
   echo "  -R INT       Width of ring artefact filter."
   echo "  -C FLOAT     Use this rotation centre instead of automatically calculated."
   echo "  -J           Correct jitter only in vertical axis."
-  echo "  -N           Apply metal artefact metal artifact reduction."
+  echo "  -N FLOAT     Apply metal artefact metal artifact reduction. 0 for no NMAR."
   echo "  -K           Keep iterim files."
   echo "  -P           Keep clean and stiched projections container."
   echo "  -I           Use output folder instead of memory to store interim files."
@@ -74,13 +75,15 @@ keepClean=false
 inplace=false
 fromStage=0
 termStage=9999
-applyNmar=false
+applyNmar="2e-10"
 true_centdiv=""
 #forcedInp=""
 #pplvariant="new"
 
+
+
 allargs=""
-while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:C:R:NIKPJS:T:Ehv" opt ; do
+while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:C:R:N:IKPJS:T:Ehv" opt ; do
   allargs=" $allargs -$opt $OPTARG"
   case $opt in
     a)  ark=$OPTARG
@@ -136,7 +139,10 @@ while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:C:R:NIKPJS:T:Ehv" opt ; do
     C)  true_centdiv=$OPTARG
         chknum "$true_centdiv" "-$opt"
         ;;
-    N)  applyNmar=true;;
+    N)  applyNmar=$OPTARG
+        chknum "$applyNmar" "-$opt"
+        chkNneg "$applyNmar" "-$opt"
+        ;;
     I)  inplace=true;;
     J)  jonly=true;;
     S)  fromStage=$OPTARG
@@ -155,6 +161,7 @@ while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:C:R:NIKPJS:T:Ehv" opt ; do
     \?) echo "ERROR! Invalid option: -$OPTARG" >&2 ; exit 1 ;;
     :)  echo "ERROR! Option -$OPTARG requires an argument." >&2 ; exit 1 ;;
   esac
+
 done
 shift $((OPTIND-1))
 
@@ -384,6 +391,7 @@ bumpstage() {
   return $(( stage >= fromStage ))
 }
 
+
 announceStage() {
   if $beverbose ; then
     fstage="$stage"
@@ -456,10 +464,6 @@ cleanUp() {
     mv "${1}"* "${out}" &
   fi
 }
-
-
-
-
 
 
 
@@ -724,12 +728,12 @@ fi
 
 
 
-# NMAR
+# NMAR - metal artefact removal
 bumpstage
 nmarOut="${iout}${pstage}_nmar.hdf"
 if (( stage >= fromStage )) ; then
   announceStage "metal artifact reduction"
-  if ! $applyNmar ; then # no NMAR
+  if [ "$applyNmar" == "0" ] ; then # no NMAR
     if $beverbose ; then
       echo "Skipping this stage because no NMAR requested (-N option)."
     fi
@@ -745,15 +749,15 @@ if (( stage >= fromStage )) ; then
     nmarOpt="$nmarOpt $( addOpt --cor-shift "$centdiv" )"
     nmarOpt="$nmarOpt $( addOpt --pixel-size "$pix" )"
     nmarOpt="$nmarOpt $( addOpt --wavelength "$wav" )"
-    nmarOpt="$nmarOpt $( addOpt --metal 2e-10 )"
-    execMe "nmar $nmarOpt ${ipcOut} ${nmarOut}"
+    nmarOpt="$nmarOpt $( addOpt --metal "$applyNmar" )"
+    execMe "nmar $nmarOpt ${ringOut} ${nmarOut}"
     cleanUp "${ringOut}"
   fi
 fi
 
 
 
-# CT
+# CT - computed tomography
 bumpstage
 ctOut="${iout}${pstage}_rec.hdf"
 if (( stage >= fromStage )) ; then
@@ -769,6 +773,7 @@ if (( stage >= fromStage )) ; then
 fi
 
 
+
 # moving results and cleanup
 announceStage "Moving result"
 if $cleanup ; then
@@ -779,6 +784,7 @@ fi
 if $cleanup  &&  [ "$iout" == "/dev/shm/bctppl/" ] ; then
   rm -rf "$iout"
 fi
+
 
 
 # Final checks

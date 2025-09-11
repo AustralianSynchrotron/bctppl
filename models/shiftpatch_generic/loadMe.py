@@ -245,13 +245,13 @@ def process(images) :
         generator = generator.to(images.device)
         generator = generator.eval()
     with torch.no_grad() :
-        #ppres, ppinfo = generator.preProc(((images,None)))
-        #ppres = generator.postProc(ppres[0], ppinfo)
+        ppres, ppinfo = generator.preProc(((images,None)))
+        ppres = generator.postProc(ppres[0], ppinfo)
         #res = ppres
         nnres = generator.forward((images,None))
-        res=nnres
-        #resRat = 2/3
-        #res = resRat * nnres + (1-resRat) * ppres
+        #res=nnres
+        resRat = 3/5
+        res = resRat * nnres + (1-resRat) * ppres
     return res
 
 

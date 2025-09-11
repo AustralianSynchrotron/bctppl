@@ -3,7 +3,7 @@
 
 chkf () {
   if [ ! -e "$1" ] ; then
-    echo "ERROR! Non existing $2 path: $1" >&2
+    echo "ERROR! Non existing \"$2\" path: $1" >&2
     exit 1
   fi
 }
@@ -20,12 +20,12 @@ wrong_num() {
   if [ -n "$3" ] ; then
     opttxt="given by option $3"
   fi
-  echo "String $1 $opttxt $2." >&2
+  echo "String \"$1\" $opttxt $2." >&2
   exit 1
 }
 
 chknum () {
-  if ! (( $( echo " $1 == $1 " | bc -l 2>/dev/null ) )) ; then
+  if ! printf '%f' "$1" &>/dev/null ; then
     wrong_num "$1" "is not a number" "$2"
   fi
 }
@@ -37,13 +37,15 @@ chkint () {
 }
 
 chkpos () {
-  if (( $(echo "0 >= $1" | bc -l) )); then
+  num="$(printf '%f' "$1")"
+  if (( $(echo "0 >= $num" | bc -l) )); then
     wrong_num "$1" "is not strictly positive" "$2"
   fi
 }
 
 chkNneg () {
-  if (( $(echo "0 > $1" | bc -l) )); then
+  num="$(printf '%f' "$1")"
+  if (( $(echo "0 > $num" | bc -l) )); then
     wrong_num "$1" "is negative" "$2"
   fi
 }
