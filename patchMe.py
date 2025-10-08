@@ -145,10 +145,11 @@ btSh = model.inShape
 batch = torch.empty( ( maxBatchSize, 4, *btSh), device = cs.device )
 def fillInGaps(inO, inS, mskO, mskS) :
 
-    ioStack = torch.stack((inO, inS, mskO, mskS), dim=0).to(cs.device)
-    inSh = ioStack.shape[-2:]
+    iStack = torch.stack((inO, inS, mskO, mskS), dim=0).to(cs.device)
+    iStack[0:2,...] *= iStack[2:4,...]
+    oStack = iStack.clone()
+    inSh = iStack.shape[-2:]
     #outStack = inStack.clone()
-    ioStack[0:2,...] *= ioStack[2:4,...]
     batchCounter = 0
     batchRanges = []
     nofPatches = 0
@@ -180,8 +181,8 @@ def fillInGaps(inO, inS, mskO, mskS) :
             #results = results_fft[...,0:msh[0], 0:msh[1]]
         for flIdx in range(batchCounter) :
             ranges = batchRanges[flIdx]
-            ioStack[0:2,*ranges] += results[flIdx,...]
-            ioStack[2:4,*ranges] += pmasks[flIdx,...]
+            oStack[0:2,*ranges] += results[flIdx,...]
+            oStack[2:4,*ranges] += pmasks[flIdx,...]
         nofPatches += batchCounter
         batchCounter = 0
         batchRanges = []
@@ -190,7 +191,7 @@ def fillInGaps(inO, inS, mskO, mskS) :
         nonlocal batchCounter, batchRanges
         if torch.any(mskO[*roi]<1) or torch.any(mskS[*roi]<1) :
             batchRanges.append(roi)
-            batch[batchCounter,...] = ioStack[:,*roi]
+            batch[batchCounter,...] = iStack[:,*roi]
             batchCounter += 1
             procBatch()
 
@@ -207,10 +208,10 @@ def fillInGaps(inO, inS, mskO, mskS) :
     for yidx in range( nofSteps[-2] ) :
         procBrick(np.s_[ yidx * step[-2] : yidx * step[-2]+ btSh[-2] , -btSh[-1] : ])
     procBatch(True)
-    ioStack[0:2] = torch.where( ioStack[2:4] > 0 , ioStack[0:2]/ioStack[2:4] , 0 )
+    oStack[0:2] = torch.where( oStack[2:4] > 0 , oStack[0:2]/oStack[2:4] , 0 )
     #print(nofPatches, math.ceil(nofPatches / btSz))
 
-    return ioStack[0:2]
+    return oStack[0:2]
 
 
 # actual stitching
