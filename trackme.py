@@ -5,7 +5,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.image import imread, imsave
 import numpy as np
-import cv2
+#import cv2
 import h5py
 import tifffile
 import tqdm
@@ -21,7 +21,9 @@ import gc
 import argparse
 import tqdm
 from scipy.optimize import curve_fit
-from multiprocessing import Pool
+from multiprocessing import set_start_method, Pool, get_context
+#ctx = get_context('forkserver')
+
 import commonsource as cs
 
 myPath = os.path.dirname(os.path.realpath(__file__))
@@ -111,7 +113,7 @@ def normalizeWithMask(ten, msk) :
     return cs.squeezeOrg(ten,odim)
 
 
-def removeBorders(img, mask) :
+def removeBorders(img, mask, ksh) :
 
   sh = img.shape
   # BCT ONLY: the ball is never in the upper part of the image:
@@ -158,22 +160,45 @@ def removeBorders(img, mask) :
 # I can move removeNorders to GPU and use it instead of Pool multiprocessing.
 # But on our 50-100 cores it will save max 5 minutes per dataset - not worth the efforts.
 def getPosInPool(data) :
-    global maskCorr
     img = data[0]
+    maskBallToUse = data[1]
+    maskCorr = data[2]
+    minArea = data[3]
+    ksh = data[4]
     if maskCorr is None :
-        maskBallToUse = data[1]
         borderMask = np.where( maskBallToUse > minArea, 1, 0).squeeze()
     else :
         borderMask = maskCorr.copy()
-    removeBorders(img, borderMask)
+    removeBorders(img, borderMask, ksh)
     img *= borderMask
     return np.array(np.unravel_index(np.argmax(img), img.shape))
 
 
-def trackIt() :
-    global maskPad, maskCount
+def trackIt(data, kernel, maskImage) :
 
     torch.no_grad()
+
+    ksh = kernel.shape[-2:]
+    kernelBin = torch.where(kernel>0, 0, 1).to(kernel.dtype).to(device)
+    minArea = math.prod(ksh) // 56
+    dsh = data.shape[1:]
+    nofF = data.shape[0]
+
+    padSh  = tuple( dsh[dim] + 2*ksh[dim] - 2        for dim in (0,1) )
+    padRng = tuple( np.s_[ksh[dim]-1 : -ksh[dim]+1]  for dim in (0,1) )
+    if maskImage is None :
+        maskPad = None
+        maskCount = None
+        maskCorr = None
+    else :
+        maskPad = torch.zeros((1, 1)+padSh, device=device)
+        maskPad[..., *padRng ] = torch.tensor(maskImage, device=device)[None,None,...]
+        maskCount = fn.conv2d(maskPad.to(kernel.dtype), torch.ones_like(kernel, device=device))
+        maskCount = torch.where(maskCount>0, 1/maskCount, 0)
+        maskBall = fn.conv2d(maskPad.to(kernelBin.dtype), kernelBin)
+        maskCorr = torch.where( maskBall > minArea, 1, 0).squeeze().cpu().numpy()
+
+
 
     #results=torch.empty( (0,2), device=device )
     results = np.empty((0,2))
@@ -184,8 +209,8 @@ def trackIt() :
     while True :
         gc.collect()
         torch.cuda.empty_cache()
-        maxNofF = int ( 0.5   * torch.cuda.mem_get_info(device)[0] / btPerIm ) # 0.5 for contingency
-        #maxNofF = 10
+        maxNofF = int ( 0.1   * torch.cuda.mem_get_info(device)[0] / btPerIm ) # 0.5 for contingency
+        #maxNofF = 1
         stopIndex=min(startIndex+maxNofF, nofF)
         fRange = np.s_[startIndex:stopIndex]
         nofR = stopIndex-startIndex
@@ -203,7 +228,7 @@ def trackIt() :
         dataCorr *= maskCountToUse
         dataNP = dataCorr.cpu().numpy()
         maskNP = maskBall.cpu().numpy()
-        dataInPool = [ ( dataNP[cursl,0,...], maskNP[cursl]) for cursl in range(nofR) ]
+        dataInPool = [ ( dataNP[cursl,0,...], maskNP[cursl], maskCorr, minArea, ksh) for cursl in range(nofR) ]
         with Pool() as p: # CPU load
             resultsR = np.array(p.map(getPosInPool, dataInPool))
             results = np.concatenate((results,resultsR),axis=0)
@@ -220,8 +245,11 @@ def trackIt() :
     return results
 
 
-def trackItFine(poses) :
+def trackItFine(poses, data, kernel, maskImage) :
     # area around expected position +/- 5 pixels and ksh on all sides
+    ksh = kernel.shape[-2:]
+    dsh = data.shape[1:]
+    nofF = data.shape[0]
     neib=5
     dataBuf = torch.zeros( (nofF, ksh[0]+2*neib, ksh[1]+2*neib), device=device )
     maskBuf = torch.zeros( (nofF, ksh[0]+2*neib, ksh[1]+2*neib), device=device )
@@ -255,7 +283,7 @@ def trackItFine(poses) :
 
 
 
-def analyzeResults(analyzeme) :
+def analyzeResults(analyzeme, frameNumbers) :
 
     def fit_as_sin(dat, xdat, xxdat=None) :
 
@@ -264,7 +292,7 @@ def analyzeResults(analyzeme) :
 
         delta = dat.max() - dat.min()
         if delta == 0 :
-            return dat
+            return dat, None
         xsize = xdat[-1]-xdat[0]
         x_norm = xdat / xsize
         meanDat = dat.mean()
@@ -373,38 +401,11 @@ def analyzeResults(analyzeme) :
 
     return allResults
 
-
-trackResults = trackIt()
-frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
-results = np.concatenate((trackResults, frameNumbers), axis=1)
-#np.savetxt(".rawtracking.dat", trackResults, fmt='%i')
-results = analyzeResults(results)
-results = trackItFine( np.round(results[:,2:4]).astype(int) )
-results = np.concatenate((results, frameNumbers), axis=1)
-results = np.round(analyzeResults(results)).astype(int)
-if args.only :
-    results[:,3] -= results[:,1]
-    results[:,1] = 0
-
-if args.smooth > 0 :
-    smoothResults = results.copy()
-    for dim in (0,1) :
-        for curF in range(nofF) :
-            if curF < args.smooth :
-                res = np.mean(results[:curF+args.smooth+1,dim])
-            elif curF > nofF - args.smooth - 1 :
-                res = np.mean(results[curF-args.smooth:curF+1,dim])
-            else :
-                res = np.mean(results[curF-args.smooth:curF+args.smooth+1,dim])
-            smoothResults[curF,dim] = np.rint(res)
-    results = smoothResults
-
-np.savetxt(args.out if args.out else sys.stdout.buffer, results, fmt='%i')
-if args.verbose :
-    plotName = os.path.splitext(args.out)[0] + "_plot.png"
-    cs.plotData( (results[:,0], results[:,1]),
-              dataYR=(results[:,2], results[:,3]),
-              saveTo = plotName, show = False)
+#if args.verbose :
+#    plotName = os.path.splitext(args.out)[0] + "_plot.png"
+#    cs.plotData( (results[:,0], results[:,1]),
+#              dataYR=(results[:,2], results[:,3]),
+#              saveTo = plotName, show = False)
 
 
 
@@ -412,11 +413,75 @@ if args.verbose :
 
 
 
+def main() :
 
 
 
+    if args.verbose :
+        print("Reading input ...", end="", flush=True)
+
+    kernelImage = cs.loadImage(os.path.dirname(__file__) + "/ball.tif")
+    kernel = torch.tensor(kernelImage, device=device).unsqueeze(0).unsqueeze(0)
+    st, mn = torch.std_mean(kernel)
+    kernel = ( kernel - mn ) / st
 
 
+    readCrop = eval(f"np.s_[:,{args.crop}]")
+    data = cs.getInData(args.images, False, preread=False)
+    data = data[readCrop]
+    dsh = data.shape[1:]
+    nofF = data.shape[0]
+
+    if args.mask == "0" : # mask per image where values are zero
+        maskImage = None
+    else :
+        maskImage = cs.loadImage(args.mask)[readCrop] if args.mask else np.ones(dsh)
+        if maskImage.shape != dsh :
+            raise Exception(f"Not matching shapes of data {dsh} and mask {maskImage.shape}.")
+        maskImage /= maskImage.max()
+
+    if args.verbose :
+        print(" Read.")
+        print("Tracking the ball.")
+
+    trackResults = trackIt(data, kernel, maskImage)
+    frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
+    results = np.concatenate((trackResults, frameNumbers), axis=1)
+    #np.savetxt(".rawtracking.dat", trackResults, fmt='%i')
+    results = analyzeResults(results, frameNumbers)
+    results = trackItFine( np.round(results[:,2:4]).astype(int), data, kernel, maskImage )
+    results = np.concatenate((results, frameNumbers), axis=1)
+    results = np.round(analyzeResults(results, frameNumbers)).astype(int)
+    if args.only :
+        results[:,3] -= results[:,1]
+        results[:,1] = 0
+
+    if args.smooth > 0 :
+        smoothResults = results.copy()
+        for dim in (0,1) :
+            for curF in range(nofF) :
+                if curF < args.smooth :
+                    res = np.mean(results[:curF+args.smooth+1,dim])
+                elif curF > nofF - args.smooth - 1 :
+                    res = np.mean(results[curF-args.smooth:curF+1,dim])
+                else :
+                    res = np.mean(results[curF-args.smooth:curF+args.smooth+1,dim])
+                smoothResults[curF,dim] = np.rint(res)
+        results = smoothResults
+
+    np.savetxt(args.out if args.out else sys.stdout.buffer, results, fmt='%i')
+
+    if args.verbose :
+        plotName = os.path.splitext(args.out)[0] + "_plot.png"
+        cs.plotData( (results[:,0], results[:,1]),
+                  dataYR=(results[:,2], results[:,3]),
+                  saveTo = plotName, show = False)
+
+
+
+if __name__ == '__main__':
+    set_start_method('forkserver')
+    main()
 
 [
 #def selectVisually() :

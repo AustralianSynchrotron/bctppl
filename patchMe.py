@@ -48,6 +48,10 @@ parser.add_argument('-o', '--output', type=str, default="",
                     help='Output HDF file with the results cropped to ovelapping region.')
 parser.add_argument('-w', '--wide', default="", type=str,
                     help='Filename for the results which fit as much as possible informative pixels.')
+parser.add_argument('-f', '--first', default="0", type=int,
+                    help='Start processing from this frame.')
+parser.add_argument('-t', '--last', default="0", type=int,
+                    help='Stop processing at this frame.')
 #parser.add_argument('-c', '--crop', default="", type=str,
 #                    help='Additionally crop final image.')
 parser.add_argument('-v', '--verbose', action='store_true', default=False,
@@ -98,6 +102,15 @@ except :
     raise
 if not len(pairs) :
     raise Exception(f"Error! Empty or corrupt data in file {args.stitch}.")
+
+if args.first < 0 or args.first > len(pairs) :
+    raise Exception(f"Error! Start frame {args.first} is out of range {len(pairs)}.")
+if args.last <= 0 :
+    if len(pairs) < -args.last :
+        raise Exception(f"Error! Stop frame {args.last} is out of range {len(pairs)}.")
+    args.last = len(pairs) - args.last
+if args.first >= args.last :
+    raise Exception(f"Error! Start frame {args.first} is greater or equal to stop frame {args.last}.")
 
 
 # prepare output
@@ -156,6 +169,8 @@ def fillInGaps(inO, inS, mskO, mskS) :
 
     def procBatch(force=False) :
         nonlocal batchCounter, batchRanges, nofPatches
+        if not batchCounter :
+            return
         if batchCounter < maxBatchSize and not force :
             return
         inps = batch[:batchCounter,...]
@@ -217,8 +232,11 @@ def fillInGaps(inO, inS, mskO, mskS) :
 # actual stitching
 if args.verbose :
     print(f"Patching:")
+pairs = pairs[args.first : args.last]
 pbar = tqdm.tqdm(total=len(pairs)) if args.verbose else None
 for idx, pair in enumerate(pairs) :
+
+    idx += args.first
 
     #if idx < 1450 : # for debug only
     #    continue
@@ -282,5 +300,4 @@ if pbar is not None :
 if args.verbose :
     print("Done!")
 exit(0)
-
 

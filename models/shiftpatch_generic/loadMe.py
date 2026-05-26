@@ -239,6 +239,8 @@ generator = None
 
 def process(images) :
     global generator
+    if not math.prod(images.shape) :
+        return images
     if generator is None :
         generator = Generator()
         generator.load_state_dict(torch.load(modelPath, map_location=images.device))
