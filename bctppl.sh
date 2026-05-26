@@ -171,8 +171,36 @@ shift $((OPTIND-1))
 
 
 
+# Prepare output and log
 
-
+out=""
+outDest="${2}"
+if [ -n "${2}" ] ; then
+  if [ "${outDest: -4}" == ".hdf" ] ; then
+    out="$(dirname "${2}")/"
+  else
+    out="${2}/"
+  fi
+  mkdir -p "${out}"
+else
+  out="./"
+  outDest="./"
+fi
+iout=""
+if $inplace ; then
+  iout="${out}"
+else
+  iout="/dev/shm/bctppl/"
+  if ! $skipExisting  &&  ! ((fromStage)) ; then
+    rm -rf "$iout" # to clean up after any previous left overs
+  fi
+  mkdir -p "$iout"
+fi
+LOGFILE="${out}.ppl.log"
+EXECRES="${iout}.res"
+touch "$LOGFILE"
+echo "# In \"$PWD\"" >> "$LOGFILE"
+echo "# $(realpath "$0") $allOpts " >> "$LOGFILE"
 
 
 
@@ -209,8 +237,10 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
     exit 1
   fi
   inp="${listOfFiles}:${hdfEntry}"
+  msg="Sample file found: $listOfFiles"
+  echo '# '"$msg" >> "$LOGFILE"
   if $beverbose ; then
-    echo "Sample file found: $listOfFiles"
+    echo "$msg"
   fi
   # BG org
   if [ -z "$bgO" ] ; then
@@ -218,10 +248,11 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
     if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
       bgO="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
+    msg="Backgrounds in original position found: $listOfFiles"
+    echo '# '"$msg" >> "$LOGFILE"
     if $beverbose ; then
-      # shellcheck disable=SC2086
-      echo "Backgrounds in original position found:" $listOfFiles
-    fi
+      echo "$msg"
+    fi    
   fi
   # BG sft
   if [ -z "$bgS" ] ; then
@@ -229,9 +260,10 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
     if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
       bgS="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
+    msg="Backgrounds in shifted position found: $listOfFiles"
+    echo '# '"$msg" >> "$LOGFILE"
     if $beverbose ; then
-      # shellcheck disable=SC2086
-      echo "Backgrounds in shifted position found:" $listOfFiles
+      echo "$msg"
     fi
   fi
   # non-specific DF
@@ -241,9 +273,10 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
     if (( $(grep "hdf" -c <<< "$listOfFiles") )) ; then
       dfC="$(addHDFpath "$listOfFiles" "$hdfEntry")"
     fi
+    msg="All dark fields found: $listOfFiles"
+    echo '# '"$msg" >> "$LOGFILE"
     if $beverbose ; then
-      # shellcheck disable=SC2086
-      echo "All dark fields found:" $listOfFiles
+      echo "$msg"
     fi
   fi
   # DF org
@@ -254,10 +287,11 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
     elif [ -n "$dfC" ] ; then
       dfO="$dfC"
     fi
+    msg="Dark fields in original position found: $listOfFiles"
+    echo '# '"$msg" >> "$LOGFILE"
     if $beverbose ; then
-      # shellcheck disable=SC2086
-      echo "Dark fields in original position found:" $listOfFiles
-    fi
+      echo "$msg"
+    fi    
   fi
   # DF sft
   if [ -z "$dfS" ] ; then
@@ -267,10 +301,11 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
     elif [ -n "$dfC" ] ; then
       dfS="$dfC"
     fi
+    msg="Dark fields in shifted position found: $listOfFiles"
+    echo '# '"$msg" >> "$LOGFILE"
     if $beverbose ; then
-      # shellcheck disable=SC2086
-      echo "Dark fields in shifted position found:" $listOfFiles
-    fi
+      echo "$msg"
+    fi    
   fi
   # PPS stream
   if [ -z "$ark" ] ; then
@@ -281,8 +316,10 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
       echo "Choose one of them and use with -a option." >&2
       exit 1
     fi
+    msg="Stream data found: $listOfFiles"
+    echo '# '"$msg" >> "$LOGFILE"
     if $beverbose ; then
-      echo "Stream data found: $listOfFiles"
+      echo "$msg"
     fi
     ark="$listOfFiles"
   fi
@@ -291,38 +328,6 @@ else
   inp="$1"
 fi
 chkhdf "$inp"
-
-
-# Prepare output and log
-
-out=""
-outDest="${2}"
-if [ -n "${2}" ] ; then
-  if [ "${outDest: -4}" == ".hdf" ] ; then
-    out="$(dirname "${2}")/"
-  else
-    out="${2}/"
-  fi
-  mkdir -p "${out}"
-else
-  out="./"
-  outDest="./"
-fi
-iout=""
-if $inplace ; then
-  iout="${out}"
-else
-  iout="/dev/shm/bctppl/"
-  if ! $skipExisting  &&  ! ((fromStage)) ; then
-    rm -rf "$iout" # to clean up after any previous left overs
-  fi
-  mkdir -p "$iout"
-fi
-LOGFILE="${out}.ppl.log"
-EXECRES="${iout}.res"
-touch "$LOGFILE"
-echo "# In \"$PWD\"" >> "$LOGFILE"
-echo "# $(realpath "$0") $allOpts " >> "$LOGFILE"
 
 
 # Check the rest of input arguments
@@ -346,9 +351,11 @@ if ! [ "$ark" -eq "$ark" ] 2>/dev/null ; then # not an integer: stream file assu
   #cat "$streamFile" | sed "$sedFiler"  > "$cleanStream"
   ark=$("$EXEPATH/analyzeStream.py" "$streamFile")
   chkint "$ark" "$streamFile"
+  msg="Found 180-deg ark: $ark"
+  echo '# '"$msg" >> "$LOGFILE"
   if $beverbose ; then
-    echo "Found 180-deg ark: $ark"
-  fi
+    echo "$msg"
+  fi  
 fi
 chkpos "$ark" "-a"
 if (( firstO + ark > firstS )) ; then
@@ -603,6 +610,9 @@ if $beverbose ; then
   echo "Rotation centre deviation: ${centdiv}. $trueCD"
   echo "Tracked 180-deg ark (for indication only): $trueArk"
 fi
+echo "# Jitter amplitudes: $amplX $amplY" >> "$LOGFILE"
+echo "# Rotation centre deviation: ${centdiv}. $trueCD" >> "$LOGFILE"
+echo "# Tracked 180-deg ark (for indication only): $trueArk" >> "$LOGFILE"
 if [ -n "$true_centdiv" ] ; then
   centdiv="$true_centdiv"
 fi
