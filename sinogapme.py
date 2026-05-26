@@ -10,6 +10,7 @@ import os
 #import statistics
 import numpy as np
 import torch
+import math
 from torchvision import transforms
 #import torch.nn as nn
 #import torch.nn.functional as fn
@@ -56,12 +57,13 @@ args = parser.parse_args()
 
 if args.verbose :
     print("Reading model ...", end="", flush=True)
-if args.model in ["", "default", "3", "mse"] :
-    from models.model3 import loadMe as model
-elif args.model in ["2", "adv"] :
-    from models.model2 import loadMe as model
-else :
-    raise Exception(f"Unknown model \"{args.model}\" given via -M/--model option.", )
+#if args.model in ["", "default", "3", "mse"] :
+#    from models.model3 import loadMe as model
+#elif args.model in ["2", "adv"] :
+#    from models.model2 import loadMe as model
+#else :
+#    raise Exception(f"Unknown model \"{args.model}\" given via -M/--model option.", )
+from models.model4 import loadMe as model
 if args.verbose :
     print("Done.")
 
@@ -72,7 +74,48 @@ generator = model.createGenerator(device)
 
 #%% EXEC
 
-def fillSinogram(sinogram) :
+
+def fillSinogram(sinogram, gapStart, gapStop) :
+
+    def unsqeeze4dim(tens):
+        orgDims = tens.dim()
+        if tens.dim() == 2 :
+            tens = tens.unsqueeze(0)
+        if tens.dim() == 3 :
+            tens = tens.unsqueeze(1)
+        return tens, orgDims
+
+    gapW = model.DCfg.gapW
+    blkW = gapW // 2
+    ssh = model.DCfg.sinoSh
+
+    sinoW = sinogram.shape[-1]
+    sinoL = sinogram.shape[-2]
+    #if sinoW % 16 :
+    #    raise Exception(f"Sinogram width {sinoW} is not devisable bny 16.")
+    #blockW = sinoW // 16
+    sinogram, _ = unsqeeze4dim(sinogram)
+    sinogram = sinogram.to(device)
+    resizedSino = torch.zeros(( 1 , 1 , sinoL , ssh[1] ), device=device)
+    resizedSino[ ... , : 7*blkW ] = torch.nn.functional.interpolate(
+        sinogram[ ... , : gapStart ], size=( sinoL , 7*blkW ), mode='bilinear')
+    resizedSino[ ... , 7*blkW : 9*blkW ] = torch.nn.functional.interpolate(
+        sinogram[ ... , gapStart : gapStop ], size=( sinoL , 2*blkW ), mode='bilinear')
+    resizedSino[ ... , 9*blkW:] = torch.nn.functional.interpolate(
+        sinogram[ ... , gapStop : ], size=( sinoL , 7*blkW ), mode='bilinear')
+
+    resizedSino = torch.nn.functional.interpolate(resizedSino, size=ssh, mode='bilinear')
+    resizedSino = generator.forward(resizedSino)
+    resizedSino = torch.nn.functional.interpolate(resizedSino, size=sinogram.shape[-2:], mode='bilinear')
+
+    sinogram[ ... , gapStart : gapStop ] =  torch.where( sinogram[ ... , gapStart : gapStop ] == 0,
+                                                          resizedSino[ ... , gapStart : gapStop ],
+                                                          sinogram[ ... , gapStart : gapStop ] )
+    return sinogram
+
+
+
+def fillSinogram_old(sinogram) :
 
     def unsqeeze4dim(tens):
         orgDims = tens.dim()
@@ -168,6 +211,7 @@ def fillSinogram(sinogram) :
     return sinogram
 
 
+os.environ["CTAS_MMAP_PATH"] = "/mnt/ssdData/:home/imbl/"
 
 if args.verbose :
     print("Reading input ...", end="", flush=True)
@@ -207,18 +251,19 @@ for curSl in range(fsh[-2]):
     if gapStart >= 0:
         gaps.append(np.s_[gapStart:fsh[-1]])
 
-    def closeGapsFromList(gapsIn) :
+    def closeGapsFromList(gapsIn, ignoreMargins = False) :
         gapsToRet = []
         for gapI, gap in enumerate(gapsIn) :
             gapW = gap.stop-gap.start
             prevGap = gapsToRet[-1].stop if len(gapsToRet) else 0
             nextGap = gapsIn[gapI+1].start if gapI < len(gapsIn)-1 else fsh[-1]
             if  gapW <= 32 \
-            and gap.start - prevGap > 2*gapW \
-            and nextGap - gap.stop > 2*gapW :
-                stripe=np.s_[ gap.start - 2*gapW : gap.stop + 2*gapW]
+            and ( ignoreMargins or gap.start - prevGap > 3.5*gapW ) \
+            and ( ignoreMargins or nextGap - gap.stop > 3.5*gapW ) :
+                sideW = math.ceil(3.5*gapW)
+                stripe=np.s_[ max(0,gap.start - sideW) : min(fsh[-1], gap.stop + sideW) ]
                 stripeData = inSinogram[:,stripe]
-                filledData = fillSinogram(stripeData).squeeze()
+                filledData = fillSinogram(stripeData, sideW, sideW+gapW).squeeze()
                 inSinogram[:,stripe] = filledData
             else :
                 #print(f"Warning. Gap {gap} does not have enough space"
@@ -227,12 +272,14 @@ for curSl in range(fsh[-2]):
                 gapsToRet.append(gap)
         return gapsToRet
 
+    # trivial gaps
     while True :
         gapsOnEnter = len(gaps)
         gaps = closeGapsFromList(gaps)
         if not len(gaps) or len(gaps) == gapsOnEnter :
             break
     curGap = 0
+    # double gaps with total width less than 32
     while curGap < len(gaps)-1 : # try to combine gaps
         combGaps = [ np.s_[ gaps[curGap].start : gaps[curGap+1].stop ], ]
         gapLeft = len(closeGapsFromList(combGaps))
@@ -240,11 +287,13 @@ for curSl in range(fsh[-2]):
             curGap += 1
         else :
             gaps = [ *gaps[:curGap], *gaps[curGap+2:] ]
-    gaps = closeGapsFromList(gaps) # last attempt. needed at all?
+    # rest of the gaps, ignore margins
+    _ = closeGapsFromList(gaps, ignoreMargins=True)
+    _ = closeGapsFromList(gaps, ignoreMargins=True)
 
-    if len(gaps) :
-        for gap in gaps :
-            leftMask[curSl,gap] = 0
+    #if len(gaps) :
+    #    for gap in gaps :
+    #        leftMask[curSl,gap] = 0
     outWrapper.put(inSinogram.cpu().numpy(), np.s_[:,curSl,:], flush=False)
     if pbar is not None:
         pbar.update(1)

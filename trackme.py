@@ -68,7 +68,7 @@ kernelBin = torch.where(kernel>0, 0, 1).to(kernel.dtype).to(device)
 minArea = math.prod(ksh) // 56
 
 readCrop = eval(f"np.s_[:,{args.crop}]")
-data = cs.getInData(args.images, False, preread=True)
+data = cs.getInData(args.images, False, preread=False)
 data = data[readCrop]
 dsh = data.shape[1:]
 nofF = data.shape[0]
