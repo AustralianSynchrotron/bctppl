@@ -42,6 +42,8 @@ parser.add_argument('-A', '--search-amplitude', default=searchAmplitude, type=in
                     help='Amplitude to search for shift in the first pair.')
 parser.add_argument('-a', '--jitter-amplitude', default=jitterAmplitude, type=int,
                     help='Maximum difference of the shifts from the one found in the first pair.')
+parser.add_argument('-O', '--only', action='store_true', default=False,
+                    help='Only calculates shift and rotation centre.')
 parser.add_argument('-v', '--verbose', action='store_true', default=False,
                     help='Plot results.')
 args = parser.parse_args()
@@ -134,6 +136,7 @@ try :
 except :
     raise Exception(f"Failed to open log file {args.output} for writing.", file=sys.stderr)
 
+
 results = []
 blocks = []
 prevShift = shiftDir if pairs[0][2] else shiftFlp
@@ -152,32 +155,37 @@ for idx, pair in enumerate(pairs) :
         blocks.append((blockStarted, idx, curBlock))
         blockStarted = idx
         curBlock = flip
-
-    # find relative shift
-    inO = torch.tensor( dataO[indeces[0]], device=cs.device )
-    inS = torch.tensor( np.flip(dataS[indeces[1]], axis=-1).copy() if flip else dataS[indeces[1]], device=cs.device )
-    mskO = torch.tensor(maskO, device=cs.device)
-    mskS = torch.tensor( np.flip(maskS, axis=-1).copy() if flip else maskS, device=cs.device )
     if indeces == directPair :
         prevShift = shiftDir
     elif indeces == flipedPair :
         prevShift = shiftFlp
-    searchCrop = tuple( np.s_[ jitterAmplitude + abs(prevShift[dim]) : -jitterAmplitude - abs(prevShift[dim]) ] \
-                        for dim in (0,1)  )
-    corrs = cs.findShift(inO[searchCrop], inS[searchCrop], mskO[searchCrop], mskS[searchCrop],
-                        amplitude=2, start=prevShift, verbose=False )
-    #corr =  tuple( round(np.median( [ cr[0][0][dim] for cr in corrs] )) for dim in (-2,-1) )
-    corr = corrs[2][0]
-    shift =  tuple( prevShift[dim] + corr[dim] for dim in (0,1) )
-    if max(  tuple(abs(shift[dim]-prevShift[dim]) for dim in (0,1) )  ) > 2:
-         print(f"Warning! in projection {idx} {indeces}: shift {shift} is more than 2 pixels"
-               f" away from previous {prevShift}. Will ignore it as a mistake.", file=sys.stderr)
-         shift = prevShift
+    
+    if args.only :
+        shift = prevShift
     else :
-        prevShift = shift # tuple( int( shift[dim] / abs(shift[dim]) ) if shift[dim] else 0  for dim in (0,1) )
+        # find relative shift
+        inO = torch.tensor( dataO[indeces[0]], device=cs.device )
+        inS = torch.tensor( np.flip(dataS[indeces[1]], axis=-1).copy() if flip else dataS[indeces[1]], device=cs.device )
+        mskO = torch.tensor(maskO, device=cs.device)
+        mskS = torch.tensor( np.flip(maskS, axis=-1).copy() if flip else maskS, device=cs.device )
+        searchCrop = tuple( np.s_[ jitterAmplitude + abs(prevShift[dim]) : -jitterAmplitude - abs(prevShift[dim]) ] \
+                            for dim in (0,1)  )
+        corrs = cs.findShift(inO[searchCrop], inS[searchCrop], mskO[searchCrop], mskS[searchCrop],
+                            amplitude=2, start=prevShift, verbose=False )
+        #corr =  tuple( round(np.median( [ cr[0][0][dim] for cr in corrs] )) for dim in (-2,-1) )
+        corr = corrs[2][0]
+        shift =  tuple( prevShift[dim] + corr[dim] for dim in (0,1) )
+        if max(  tuple(abs(shift[dim]-prevShift[dim]) for dim in (0,1) )  ) > 2:
+             print(f"Warning! in projection {idx} {indeces}: shift {shift} is more than 2 pixels"
+                   f" away from previous {prevShift}. Will ignore it as a mistake.", file=sys.stderr)
+             shift = prevShift
+        else :
+            prevShift = shift # tuple( int( shift[dim] / abs(shift[dim]) ) if shift[dim] else 0  for dim in (0,1) )
+
     results.append( [ *indeces, *shift, flip ] )
     if pbar is not None :
         pbar.update()
+
 blocks.append((blockStarted, idx+1, curBlock))
 if pbar is not None :
     del pbar
