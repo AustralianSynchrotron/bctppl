@@ -58,45 +58,45 @@ except:
 
 
 
-if args.verbose :
-    print("Reading input ...", end="", flush=True)
+#if args.verbose :
+#    print("Reading input ...", end="", flush=True)
+#
+#kernelImage = cs.loadImage(os.path.dirname(__file__) + "/ball.tif")
+#ksh = kernelImage.shape
+#kernel = torch.tensor(kernelImage, device=device).unsqueeze(0).unsqueeze(0)
+#st, mn = torch.std_mean(kernel)
+#kernel = ( kernel - mn ) / st
+#kernelBin = torch.where(kernel>0, 0, 1).to(kernel.dtype).to(device)
+#minArea = math.prod(ksh) // 56
 
-kernelImage = cs.loadImage(os.path.dirname(__file__) + "/ball.tif")
-ksh = kernelImage.shape
-kernel = torch.tensor(kernelImage, device=device).unsqueeze(0).unsqueeze(0)
-st, mn = torch.std_mean(kernel)
-kernel = ( kernel - mn ) / st
-kernelBin = torch.where(kernel>0, 0, 1).to(kernel.dtype).to(device)
-minArea = math.prod(ksh) // 56
+#readCrop = eval(f"np.s_[:,{args.crop}]")
+#data = cs.getInData(args.images, False, preread=False)
+#data = data[readCrop]
+#dsh = data.shape[1:]
+#nofF = data.shape[0]
 
-readCrop = eval(f"np.s_[:,{args.crop}]")
-data = cs.getInData(args.images, False, preread=False)
-data = data[readCrop]
-dsh = data.shape[1:]
-nofF = data.shape[0]
+#padSh  = tuple( dsh[dim] + 2*ksh[dim] - 2        for dim in (0,1) )
+#padRng = tuple( np.s_[ksh[dim]-1 : -ksh[dim]+1]  for dim in (0,1) )
+#if args.mask == "0" : # mask per image where values are zero
+#    maskImage = None
+#    maskPad = None
+#    maskCount = None
+#    maskCorr = None
+#else :
+#    maskImage = cs.loadImage(args.mask)[readCrop] if args.mask else np.ones(dsh)
+#    if maskImage.shape != dsh :
+#        raise Exception(f"Not matching shapes of data {dsh} and mask {maskImage.shape}.")
+#    maskImage /= maskImage.max()
+#    maskPad = torch.zeros((1, 1)+padSh, device=device)
+#    maskPad[..., *padRng ] = torch.tensor(maskImage, device=device)[None,None,...]
+#    maskCount = fn.conv2d(maskPad.to(kernel.dtype), torch.ones_like(kernel, device=device))
+#    maskCount = torch.where(maskCount>0, 1/maskCount, 0)
+#    maskBall = fn.conv2d(maskPad.to(kernelBin.dtype), kernelBin)
+#    maskCorr = torch.where( maskBall > minArea, 1, 0).squeeze().cpu().numpy()
 
-padSh  = tuple( dsh[dim] + 2*ksh[dim] - 2        for dim in (0,1) )
-padRng = tuple( np.s_[ksh[dim]-1 : -ksh[dim]+1]  for dim in (0,1) )
-if args.mask == "0" : # mask per image where values are zero
-    maskImage = None
-    maskPad = None
-    maskCount = None
-    maskCorr = None
-else :
-    maskImage = cs.loadImage(args.mask)[readCrop] if args.mask else np.ones(dsh)
-    if maskImage.shape != dsh :
-        raise Exception(f"Not matching shapes of data {dsh} and mask {maskImage.shape}.")
-    maskImage /= maskImage.max()
-    maskPad = torch.zeros((1, 1)+padSh, device=device)
-    maskPad[..., *padRng ] = torch.tensor(maskImage, device=device)[None,None,...]
-    maskCount = fn.conv2d(maskPad.to(kernel.dtype), torch.ones_like(kernel, device=device))
-    maskCount = torch.where(maskCount>0, 1/maskCount, 0)
-    maskBall = fn.conv2d(maskPad.to(kernelBin.dtype), kernelBin)
-    maskCorr = torch.where( maskBall > minArea, 1, 0).squeeze().cpu().numpy()
-
-if args.verbose :
-    print(" Read.")
-    print("Tracking the ball.")
+#if args.verbose :
+#    print(" Read.")
+#    print("Tracking the ball.")
 
 
 
@@ -174,14 +174,14 @@ def getPosInPool(data) :
     return np.array(np.unravel_index(np.argmax(img), img.shape))
 
 
-def trackIt(data, kernel, maskImage) :
+def trackIt(data, readCrop, kernel, maskImage) :
 
     torch.no_grad()
 
     ksh = kernel.shape[-2:]
     kernelBin = torch.where(kernel>0, 0, 1).to(kernel.dtype).to(device)
     minArea = math.prod(ksh) // 56
-    dsh = data.shape[1:]
+    dsh = data[0,readCrop].shape
     nofF = data.shape[0]
 
     padSh  = tuple( dsh[dim] + 2*ksh[dim] - 2        for dim in (0,1) )
@@ -215,7 +215,7 @@ def trackIt(data, kernel, maskImage) :
         fRange = np.s_[startIndex:stopIndex]
         nofR = stopIndex-startIndex
         dataPad = torch.zeros( (nofR, 1, *padSh ) )
-        dataPad[..., *padRng] = torch.tensor(data[fRange,...]).unsqueeze(1)
+        dataPad[..., *padRng] = torch.tensor(data[fRange,readCrop]).unsqueeze(1)
         dataPad = dataPad.to(device)
         maskPadToUse = dataPad > 0 if maskPad is None else maskPad.expand(dataPad.shape)
         dataPad = normalizeWithMask(dataPad, maskPadToUse)
@@ -245,10 +245,10 @@ def trackIt(data, kernel, maskImage) :
     return results
 
 
-def trackItFine(poses, data, kernel, maskImage) :
+def trackItFine(poses, data, readCrop, kernel, maskImage) :
     # area around expected position +/- 5 pixels and ksh on all sides
     ksh = kernel.shape[-2:]
-    dsh = data.shape[1:]
+    dsh = data[0,readCrop].shape
     nofF = data.shape[0]
     neib=5
     dataBuf = torch.zeros( (nofF, ksh[0]+2*neib, ksh[1]+2*neib), device=device )
@@ -261,7 +261,7 @@ def trackItFine(poses, data, kernel, maskImage) :
         arSz    = tuple( imTo[dim] - imFrom[dim]                    for dim in (0,1) )
         dstFrom = tuple( imFrom[dim] - pos[dim] + neib              for dim in (0,1) )
         dstROI  = tuple( np.s_[dstFrom[dim] : dstFrom[0]+arSz[dim]] for dim in (0,1) )
-        dataBuf[cursl, *dstROI ] = torch.tensor( device=device, data = data[cursl,*srcROI])
+        dataBuf[cursl, *dstROI ] = torch.tensor( device=device, data = data[cursl,readCrop][*srcROI])
         maskBuf[cursl, *dstROI ] = (dataBuf[cursl,*dstROI] > 0).to(dataBuf.dtype)  \
                                    if maskImage is None else \
                                    torch.tensor(device=device, data = maskImage[srcROI] )
@@ -426,10 +426,10 @@ def main() :
     kernel = ( kernel - mn ) / st
 
 
-    readCrop = eval(f"np.s_[:,{args.crop}]")
+    readCrop = eval(f"np.s_[{args.crop}]")
     data = cs.getInData(args.images, False, preread=False)
-    data = data[readCrop]
-    dsh = data.shape[1:]
+    #data = data[readCrop]
+    dsh = data[0,readCrop].shape
     nofF = data.shape[0]
 
     if args.mask == "0" : # mask per image where values are zero
@@ -444,12 +444,12 @@ def main() :
         print(" Read.")
         print("Tracking the ball.")
 
-    trackResults = trackIt(data, kernel, maskImage)
+    trackResults = trackIt(data, readCrop, kernel, maskImage)
     frameNumbers = np.expand_dims( np.linspace(0, nofF-1, nofF), 1)
     results = np.concatenate((trackResults, frameNumbers), axis=1)
     #np.savetxt(".rawtracking.dat", trackResults, fmt='%i')
     results = analyzeResults(results, frameNumbers)
-    results = trackItFine( np.round(results[:,2:4]).astype(int), data, kernel, maskImage )
+    results = trackItFine( np.round(results[:,2:4]).astype(int), data, readCrop, kernel, maskImage )
     results = np.concatenate((results, frameNumbers), axis=1)
     results = np.round(analyzeResults(results, frameNumbers)).astype(int)
     if args.only :
