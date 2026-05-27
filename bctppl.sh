@@ -36,7 +36,7 @@ printhelp() {
   echo "  -i FLOAT     Delta to beta ratio for phase retreival."
   echo "  -R INT       Width of ring artefact filter."
   echo "  -C FLOAT     Use this rotation centre instead of automatically calculated."
-  echo "  -J           Correct jitter only in vertical axis."
+  echo "  -J           Correct jitter from ball bearing."
   echo "  -N FLOAT     Apply metal artefact metal artifact reduction. 0 for no NMAR."
   echo "  -K           Keep iterim files."
   echo "  -P           Keep clean and stiched projections container."
@@ -67,7 +67,8 @@ wav=""
 d2b=""
 pix=""
 ring=""
-jonly=false
+jonly=true
+ballJitter=false
 skipExisting=false
 beverbose=false
 cleanup=true
@@ -144,7 +145,7 @@ while getopts "b:B:d:D:m:a:f:F:e:Z:c:r:z:w:p:i:C:R:N:IKPJS:T:Ehv" opt ; do
         chkNneg "$applyNmar" "-$opt"
         ;;
     I)  inplace=true;;
-    J)  jonly=true;;
+    J)  ballJitter=true;;
     S)  fromStage=$OPTARG
         chkint "$fromStage" "-$opt"
         chkpos "$fromStage" "-$opt"
@@ -563,6 +564,9 @@ if (( stage >= fromStage )) ; then
     execMe "$EXEPATH/stitch.sh -f 0 -F 0 -a $ark -s $(( firstS - firstO )) -g 0,0 -c 0  > $stFile "
     shiftsOpt="$beverboseO"
     shiftsOpt="$shiftsOpt -s $stFile -m ${splitOut}mask.tif"
+    if ! $ballJitter ; then
+      shiftsOpt="$shiftsOpt -O"
+    fi
     execMe "$EXEPATH/pairShift.py $shiftsOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data -o $shiftsOut"
     rm -rf "$stFile"
   fi
@@ -577,63 +581,89 @@ if (( stage >= fromStage )) ; then
   if needToMake "${patchOut}ForProc.hdf" "${patchOut}ForTrack.hdf" ; then
     patchOpt="$beverboseO"
     patchOpt="$patchOpt -m ${splitOut}mask.tif -s $shiftsOut"
-    patchOpt="$patchOpt -o ${patchOut}ForProc.hdf:/data -w ${patchOut}ForTrack.hdf:/data"
+    patchOpt="$patchOpt -o ${patchOut}ForProc.hdf:/data"
+    if $ballJitter ; then
+      patchOpt="$patchOpt -w ${patchOut}ForTrack.hdf:/data"
+    fi
     execMe "$EXEPATH/patchMe.py $patchOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data "
   fi
   cleanUp "${splitOut}"
 fi
 
 
-# track the ball
+
 bumpstage
-trackOut="${iout}${pstage}_track.dat"
-if (( stage >= fromStage )) ; then
-  announceStage "tracking the ball"
-  if needToMake "$trackOut" ; then
-    execMe "$EXEPATH/trackme.py ${patchOut}ForTrack.hdf:/data -o $trackOut $beverboseO -m 0"
-    ctas v2v "${patchOut}ForTrack.hdf:/data:0" -o .split_shape.tif
+if $ballJitter ; then
+
+  # track the ball
+  trackOut="${iout}${pstage}_track.dat"
+  if (( stage >= fromStage )) ; then
+    announceStage "tracking the ball"
+    if needToMake "$trackOut" ; then
+      execMe "$EXEPATH/trackme.py ${patchOut}ForTrack.hdf:/data -o $trackOut $beverboseO -m 0"
+      ctas v2v "${patchOut}ForTrack.hdf:/data:0" -o .split_shape.tif
+    fi
+    cleanUp "${patchOut}ForTrack.hdf"
   fi
-  cleanUp "${patchOut}ForTrack.hdf"
-fi
-splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
-ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
-execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth $trackOut > $EXECRES"
-# shellcheck disable=SC2034
-read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
-#centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
-if $beverbose ; then
-  trueCD=""
-  if [ -n "$true_centdiv" ] ; then
-    trueCD="Will use user provided: $true_centdiv."
+  splitWidth=$( identify -quiet ".split_shape.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
+  ballWidth=$( identify -quiet "$EXEPATH/ball.tif" | cut -d' ' -f 3 |  cut -d'x' -f 1 )
+  execMe "$EXEPATH/analyzeTrack.py -a $ark -s $(( firstS - firstO )) -w $splitWidth -W $ballWidth $trackOut > $EXECRES"
+  # shellcheck disable=SC2034
+  read -r amplX amplY shiftX shiftY centdiv trueArk < "$EXECRES"
+  #centdiv=$( echo "scale=2; $centdiv - $amplX" | bc )
+  if $beverbose ; then
+    echo "Jitter amplitudes: $amplX $amplY"
+    echo "Rotation centre deviation: ${centdiv}. $true_centdiv"
+    echo "Tracked 180-deg ark (for indication only): $trueArk"
   fi
-  echo "Jitter amplitudes: $amplX $amplY"
-  echo "Rotation centre deviation: ${centdiv}. $trueCD"
-  echo "Tracked 180-deg ark (for indication only): $trueArk"
+  echo "# Jitter amplitudes: $amplX $amplY" >> "$LOGFILE"
+  echo "# Rotation centre deviation: ${centdiv}. $true_centdiv" >> "$LOGFILE"
+  echo "# Tracked 180-deg ark (for indication only): $trueArk" >> "$LOGFILE"
+
+else # if ballJitter
+  centdiv=$(cat "$shiftsOut" | grep Rota | cut -d' ' -f 4)
+  if $beverbose ; then
+    echo "Rotation centre deviation: ${centdiv}. $true_centdiv"
+  fi
+  echo "# Rotation centre deviation: ${centdiv}. $true_centdiv" >> "$LOGFILE"
 fi
-echo "# Jitter amplitudes: $amplX $amplY" >> "$LOGFILE"
-echo "# Rotation centre deviation: ${centdiv}. $trueCD" >> "$LOGFILE"
-echo "# Tracked 180-deg ark (for indication only): $trueArk" >> "$LOGFILE"
+
 if [ -n "$true_centdiv" ] ; then
   centdiv="$true_centdiv"
 fi
 
 
-# align
 bumpstage
-alignOut="${iout}${pstage}_align"
-if (( stage >= fromStage )) ; then
-  announceStage "aligning"
-  if needToMake "${alignOut}.hdf" ; then
-    alignOpt="$beverboseO"
-    alignOpt="$alignOpt -S ${amplX},${amplY} -m 0 -s $trackOut"
-    if $jonly ; then
-      alignOpt="$alignOpt -J "
+if $ballJitter ; then
+  # align
+  alignOut="${iout}${pstage}_align"
+  if (( stage >= fromStage )) ; then
+    announceStage "aligning"
+    if needToMake "${alignOut}.hdf" ; then
+      alignOpt="$beverboseO"
+      alignOpt="$alignOpt -S ${amplX},${amplY} -m 0 -s $trackOut"
+      if $jonly ; then
+        alignOpt="$alignOpt -J "
+      fi
+      execMe "$EXEPATH/align $alignOpt ${patchOut}ForProc.hdf:/data -o ${alignOut}.hdf:/data"
     fi
-    execMe "$EXEPATH/align $alignOpt ${patchOut}ForProc.hdf:/data -o ${alignOut}.hdf:/data"
+    cleanUp "${patchOut}ForProc.hdf"
   fi
-  cleanUp "${patchOut}ForProc.hdf"
-fi
+else # if ballJitter
+  alignOut="${patchOut}ForProc"
+  if (( stage >= fromStage )) ; then
+    announceStage "mask for sinogap"
+    orgProj=$(cat "$shiftsOut" | grep -v '#' | cut -d' ' -f 1,5 | grep -m 1 " 0" | cut -d' ' -f 1)
+    execMe "ctas v2v "${alignOut}.hdf:/data:${orgProj}" -m 0 -M 0.0001 -i 8 -o ${iout}.msk0.tif"
+    sftProj=$(cat "$shiftsOut" | grep -v '#' | cut -d' ' -f 1,5 | grep -m 1 " 1" | cut -d' ' -f 1)
+    execMe "ctas v2v "${alignOut}.hdf:/data:${sftProj}" -m 0 -M 0.0001 -i 8 -o ${iout}.msk1.tif"
+    execMe "composite -compose Multiply ${iout}.msk0.tif ${iout}.msk1.tif ${alignOut}_mask.tif"
+    rm ${iout}.msk0.tif ${iout}.msk1.tif
+  fi
+fi # if ballJitter
 
+  
+ 
 
 # fill gaps
 bumpstage
