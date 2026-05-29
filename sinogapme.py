@@ -39,6 +39,8 @@ except KeyError:
 except:
     pass
 cs.device = device
+#props = torch.cuda.get_device_properties(device)
+#print(device, props.uuid)
 
 
 parser = argparse.ArgumentParser(description='Fill missing data using sinogap model.')
