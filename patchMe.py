@@ -83,6 +83,7 @@ else :
     raise Exception("Error! No input data name given via -s/--stitch option.")
 pairs = []
 maxDiv = (0,0)
+minDiv = (0,0)
 try:
     while True:
         strg = input().strip()
@@ -94,8 +95,10 @@ try:
         pairs.append( ( (int(rs[0]), int(rs[1])),
                         (int(rs[2]), int(rs[3])),
                         bool(int(rs[4])) ) )
-        maxDiv =  ( max( maxDiv[0], abs(int(rs[2])) ) ,
-                    max( maxDiv[1], abs(int(rs[3])) ) )
+        maxDiv =  ( max( maxDiv[0], int(rs[2]) ) ,
+                    max( maxDiv[1], int(rs[3]) ) )
+        minDiv =  ( min( minDiv[0], int(rs[2]) ) ,
+                    min( minDiv[1], int(rs[3]) ) )
 except EOFError:
     pass
 except :
@@ -114,8 +117,9 @@ if args.first >= args.last :
 
 
 # prepare output
-finalSh = tuple( face[dim] - 2*maxDiv[dim] for dim in (0,1) )
-orgPos = maxDiv
+finalSh = tuple( face[dim] - maxDiv[dim] + minDiv[dim] for dim in (0,1) )
+orgROI = tuple( np.s_[ maxDiv[dim] : face[dim] + minDiv[dim] ] for dim in (0,1) )
+#orgPos = maxDiv
 toOut = torch.empty(finalSh, device=cs.device)
 outPut = cs.OutputWrapper(args.output, (len(pairs), *finalSh) )
 if len(args.wide) :
@@ -251,22 +255,27 @@ for idx, pair in enumerate(pairs) :
     mskS = maskF if flip else maskS
 
     # fill the patches
-    subO =  tuple( np.s_[ max(0,  shift[dim]) : face[dim] + min( shift[dim], 0) ] for dim in (0,1)  )
-    subS =  tuple( np.s_[ max(0, -shift[dim]) : face[dim] + min(-shift[dim], 0) ] for dim in (0,1)  )
+    #subO =  tuple( np.s_[ max(0,  shift[dim]) : face[dim] + min( shift[dim], 0) ] for dim in (0,1)  )
+    subO = orgROI
+    #subS =  tuple( np.s_[ max(0, -shift[dim]) : face[dim] + min(-shift[dim], 0) ] for dim in (0,1)  )
+    subS =  tuple( np.s_[ orgROI[dim].start - shift[dim] : orgROI[dim].stop - shift[dim] ] for dim in (0,1)  )
     filledPair = fillInGaps( inO[*subO], inS[*subS], mskO[*subO], mskS[*subS])
 
     # stitch tight
     stitched = torch.clamp(filledPair[0,...]+filledPair[1,...], min=0 ) / 2
     eps = stitched[stitched>0].min() / 100
     stitched += torch.where( mskO[*subO] + mskS[*subS] > 0 , eps , 0 ) # zero is the mask
-    cornerPos = tuple( orgPos[dim] - subO[dim].start for dim in (0,1) )
-    startRes =  tuple( max(0,  cornerPos[dim]) for dim in (0,1) )
-    startOut =  tuple( max(0, -cornerPos[dim]) for dim in (0,1) )
-    roiSh =  tuple( min( stitched.shape[dim] - startRes[dim], finalSh[dim] - startOut[dim] ) for dim in (0,1) )
-    subRes =  tuple( np.s_[ startRes[dim] : startRes[dim] +roiSh[dim] ] for dim in (0,1) )
-    subOut =  tuple( np.s_[ startOut[dim] : startOut[dim] +roiSh[dim] ] for dim in (0,1) )
-    toOut[...] = 0
-    toOut[subOut] = stitched[subRes]
+
+
+    #cornerPos = tuple( orgPos[dim] - subO[dim].start for dim in (0,1) )
+    #startRes =  tuple( max(0,  cornerPos[dim]) for dim in (0,1) )
+    #startOut =  tuple( max(0, -cornerPos[dim]) for dim in (0,1) )
+    #roiSh =  tuple( min( stitched.shape[dim] - startRes[dim], finalSh[dim] - startOut[dim] ) for dim in (0,1) )
+    #subRes =  tuple( np.s_[ startRes[dim] : startRes[dim] +roiSh[dim] ] for dim in (0,1) )
+    #subOut =  tuple( np.s_[ startOut[dim] : startOut[dim] +roiSh[dim] ] for dim in (0,1) )
+    #toOut[...] = 0
+    #toOut[subOut] = stitched[subRes]
+    toOut[...] = stitched
     outPut.put(toOut.cpu().numpy(), idx)
 
     # stitch wide

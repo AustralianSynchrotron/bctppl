@@ -79,6 +79,11 @@ generator = model.createGenerator(device)
 
 def fillSinogram(sinogram, gapStart, gapStop) :
 
+    sinoW = sinogram.shape[-1]
+    sinoL = sinogram.shape[-2]
+    if gapStart < 1 or gapStop >= sinoW - 1 :
+        return sinogram
+
     def unsqeeze4dim(tens):
         orgDims = tens.dim()
         if tens.dim() == 2 :
@@ -91,8 +96,6 @@ def fillSinogram(sinogram, gapStart, gapStop) :
     blkW = gapW // 2
     ssh = model.DCfg.sinoSh
 
-    sinoW = sinogram.shape[-1]
-    sinoL = sinogram.shape[-2]
     #if sinoW % 16 :
     #    raise Exception(f"Sinogram width {sinoW} is not devisable bny 16.")
     #blockW = sinoW // 16
