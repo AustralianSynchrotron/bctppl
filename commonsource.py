@@ -355,7 +355,7 @@ def stretchImage(image) :
     if mn < mx :
         image = (image - mn) / (mx - mn)
     else :
-        image = mn
+        image[...] = mn
     return image
 
 

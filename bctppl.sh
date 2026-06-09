@@ -511,7 +511,7 @@ if (( stage >= fromStage )) ; then
       echo "Creating mask from background image \"$bgOu\" and save to \"$gmask\"."
     fi
     premask="${iout}.premask.tif"
-    execMe "ctas v2v $bgOu -i 8 -m 65534 -M 65535 -o $premask"
+    execMe "ctas v2v $bgOu -i 8 -m 65400 -M 65401 -o $premask"
     execMe "convert $premask -morphology dilate square -negate ${gmask}"
     rm "$premask"
   fi

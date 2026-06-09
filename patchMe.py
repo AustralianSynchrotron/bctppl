@@ -123,7 +123,7 @@ orgROI = tuple( np.s_[ maxDiv[dim] : face[dim] + minDiv[dim] ] for dim in (0,1) 
 toOut = torch.empty(finalSh, device=cs.device)
 outPut = cs.OutputWrapper(args.output, (len(pairs), *finalSh) )
 if len(args.wide) :
-    orgPosW = tuple( maxDiv[dim] + jitterAmplitude for dim in (0,1) )
+    orgPosW = tuple( max(maxDiv[dim], -minDiv[dim]) + jitterAmplitude for dim in (0,1) )
     finalShW = tuple( face[dim] + 2*orgPosW[dim] for dim in (0,1) )
     toOutW = torch.empty(finalShW, device=cs.device)
     outPutW = cs.OutputWrapper(args.wide, (len(pairs), *finalShW) )
