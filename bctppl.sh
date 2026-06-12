@@ -218,7 +218,7 @@ fi
 addHDFpath() {
   outLine=""
   for file in $1 ; do
-    outLine="$outLine ${file}:${2}"
+    outLine="$outLine ${file}@${2}"
   done
   echo "$outLine"
 }
@@ -237,7 +237,7 @@ if [[ -d "$(realpath "${1}" 2> /dev/null)" ]]; then # input is a directory
     echo "$listOfFiles" >&2
     exit 1
   fi
-  inp="${listOfFiles}:${hdfEntry}"
+  inp="${listOfFiles}@${hdfEntry}"
   msg="Sample file found: $listOfFiles"
   echo '# '"$msg" >> "$LOGFILE"
   if $beverbose ; then
@@ -567,7 +567,7 @@ if (( stage >= fromStage )) ; then
     if ! $ballJitter ; then
       shiftsOpt="$shiftsOpt -O"
     fi
-    execMe "$EXEPATH/pairShift.py $shiftsOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data -o $shiftsOut"
+    execMe "$EXEPATH/pairShift.py $shiftsOpt ${splitOut}org.hdf@/data ${splitOut}sft.hdf@/data -o $shiftsOut"
     rm -rf "$stFile"
   fi
 fi
@@ -581,11 +581,11 @@ if (( stage >= fromStage )) ; then
   if needToMake "${patchOut}ForProc.hdf" "${patchOut}ForTrack.hdf" ; then
     patchOpt="$beverboseO"
     patchOpt="$patchOpt -m ${splitOut}mask.tif -s $shiftsOut"
-    patchOpt="$patchOpt -o ${patchOut}ForProc.hdf:/data"
+    patchOpt="$patchOpt -o ${patchOut}ForProc.hdf@/data"
     if $ballJitter ; then
-      patchOpt="$patchOpt -w ${patchOut}ForTrack.hdf:/data"
+      patchOpt="$patchOpt -w ${patchOut}ForTrack.hdf@/data"
     fi
-    execMe "$EXEPATH/patchMe.py $patchOpt ${splitOut}org.hdf:/data ${splitOut}sft.hdf:/data "
+    execMe "$EXEPATH/patchMe.py $patchOpt ${splitOut}org.hdf@/data ${splitOut}sft.hdf@/data "
   fi
   cleanUp "${splitOut}"
 fi
@@ -600,8 +600,8 @@ if $ballJitter ; then
   if (( stage >= fromStage )) ; then
     announceStage "tracking the ball"
     if needToMake "$trackOut" ; then
-      execMe "$EXEPATH/trackme.py ${patchOut}ForTrack.hdf:/data -o $trackOut $beverboseO -m 0"
-      ctas v2v "${patchOut}ForTrack.hdf:/data:0" -o .split_shape.tif
+      execMe "$EXEPATH/trackme.py ${patchOut}ForTrack.hdf@/data -o $trackOut $beverboseO -m 0"
+      ctas v2v "${patchOut}ForTrack.hdf@/data@0" -o .split_shape.tif
     fi
     cleanUp "${patchOut}ForTrack.hdf"
   fi
@@ -645,7 +645,7 @@ if $ballJitter ; then
       if $jonly ; then
         alignOpt="$alignOpt -J "
       fi
-      execMe "$EXEPATH/align $alignOpt ${patchOut}ForProc.hdf:/data -o ${alignOut}.hdf:/data"
+      execMe "$EXEPATH/align $alignOpt ${patchOut}ForProc.hdf@/data -o ${alignOut}.hdf@/data"
     fi
     cleanUp "${patchOut}ForProc.hdf"
   fi
@@ -654,9 +654,9 @@ else # if ballJitter
   if (( stage >= fromStage )) ; then
     announceStage "mask for sinogap"
     orgProj=$(cat "$shiftsOut" | grep -v '#' | cut -d' ' -f 1,5 | grep -m 1 " 0" | cut -d' ' -f 1)
-    execMe "ctas v2v "${alignOut}.hdf:/data:${orgProj}" -m 0 -M 0.0001 -i 8 -o ${iout}.msk0.tif"
+    execMe "ctas v2v "${alignOut}.hdf@/data@${orgProj}" -m 0 -M 0.0001 -i 8 -o ${iout}.msk0.tif"
     sftProj=$(cat "$shiftsOut" | grep -v '#' | cut -d' ' -f 1,5 | grep -m 1 " 1" | cut -d' ' -f 1)
-    execMe "ctas v2v "${alignOut}.hdf:/data:${sftProj}" -m 0 -M 0.0001 -i 8 -o ${iout}.msk1.tif"
+    execMe "ctas v2v "${alignOut}.hdf@/data@${sftProj}" -m 0 -M 0.0001 -i 8 -o ${iout}.msk1.tif"
     execMe "composite -compose Multiply ${iout}.msk0.tif ${iout}.msk1.tif ${alignOut}_mask.tif"
     rm ${iout}.msk0.tif ${iout}.msk1.tif
   fi
@@ -673,11 +673,11 @@ if (( stage >= fromStage )) ; then
   if needToMake "${fillOut}.hdf" ; then
     fillOpt="$beverboseO"
     fillCom="$EXEPATH/sinogapme.py $fillOpt"
-    execMe "$fillCom ${alignOut}.hdf:/data -m ${alignOut}_mask.tif ${fillOut}.hdf:/data"
+    execMe "$fillCom ${alignOut}.hdf@/data -m ${alignOut}_mask.tif ${fillOut}.hdf@/data"
     leftMask="${fillOut}_mask_left.tif"
     if [ -e "$leftMask" ] && [ "1" != "$( convert "$leftMask" -format '%[fx:minima]' info: )" ] ; then
       announceStage "1" "filling gaps left after sinogap"
-      execMe "ctas proj $beverboseO ${fillOut}.hdf:/data -o ${fillOut}_am.hdf:/data -M $leftMask -I AM"
+      execMe "ctas proj $beverboseO ${fillOut}.hdf@/data -o ${fillOut}_am.hdf@/data -M $leftMask -I AM"
       rm "${fillOut}.hdf"
       mv "${fillOut}_am.hdf" "${fillOut}.hdf"
     fi
@@ -724,7 +724,7 @@ if (( stage >= fromStage )) ; then
       else
         ipcOpt="$ipcOpt -r $pix"
       fi
-      execMe "ctas ipc $ipcOpt ${ipcIn}:/data -o ${ipcOut}:/data"
+      execMe "ctas ipc $ipcOpt ${ipcIn}@/data -o ${ipcOut}@/data"
     fi
     if ! $keepClean ; then
       cleanUp "${ipcIn}"
@@ -753,11 +753,11 @@ if (( stage >= fromStage )) ; then
 
       ringOpt="$beverboseO"
       # first ring removal algorithm (from Ashkan)
-      execMe "$EXEPATH/ring.py $ringOpt --correct ${ipcOut}:/data ${ringOut}:/data"
+      execMe "$EXEPATH/ring.py $ringOpt --correct ${ipcOut}@/data ${ringOut}@/data"
       # second ring removal algorithm (from ctas), applied only to sinogapped regions
       if (( ring > 0 )) ; then
         execMe "mv  ${ringOut}  ${ringOut}.hdf"
-        execMe "ctas ring $ringOpt -R $ring -o ${ringOut}:/data:y -m ${alignOut}_mask.tif  ${ringOut}.hdf:/data:y "
+        execMe "ctas ring $ringOpt -R $ring -o ${ringOut}@/data@y -m ${alignOut}_mask.tif  ${ringOut}.hdf@/data@y "
         rm  "${ringOut}.hdf"
       fi
     fi
@@ -807,7 +807,7 @@ if (( stage >= fromStage )) ; then
       ctOpt="$ctOpt $( addOpt -r "$pix" ) "
       ctOpt="$ctOpt $( addOpt -w "$wav" ) "
       step=$(echo "scale=8 ; 180 / $ark " | bc )
-      execMe "ctas ct $ctOpt -k a -a $step -c $centdiv ${nmarOut}:/data:y -o ${ctOut}:/data"
+      execMe "ctas ct $ctOpt -k a -a $step -c $centdiv ${nmarOut}@/data@y -o ${ctOut}@/data"
   fi
   cleanUp "${ringOut}"
 fi

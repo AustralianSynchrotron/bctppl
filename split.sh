@@ -144,7 +144,7 @@ fi
 
 
 # original position
-org_args=" $args -o ${2}org.hdf:/data ${1}:${firstO}+${end}${skip} "
+org_args=" $args -o ${2}org.hdf@/data ${1}@${firstO}+${end}${skip} "
 if [ -n "$bgO" ] ; then
   org_args="$org_args -B $bgO "
 fi
@@ -154,7 +154,7 @@ fi
 execMe "ctas proj $org_args"
 
 # shifted position
-sft_args=" $args -o ${2}sft.hdf:/data ${1}:${firstS}+${end}${skip} "
+sft_args=" $args -o ${2}sft.hdf@/data ${1}@${firstS}+${end}${skip} "
 if [ -n "$bgS" ] ; then
   sft_args="$sft_args -B $bgS "
 fi

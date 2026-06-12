@@ -36,7 +36,7 @@ clargs::clargs(int argc, char *argv[])
 
     .add(poptmx::NOTE, "OPTIONS:")
     .add(poptmx::OPTION, &outimages, 'o', "output", "Output result prefix or filename.",
-           "Output filename if output is a single file. Output mask otherwise. " + MaskDesc, outimages)
+           "Output filename if output is a single file. Output mask otherwise.", outimages)
     .add(poptmx::OPTION, &shifts, 's', "shifts", "Text file with shifts.",
          "Shifts are two columns of numbers representinf X and Y shifts for each slice in input stack."
          " Must contain at least same number of shifts as input slices.")

@@ -9,8 +9,8 @@ chkf () {
 }
 
 chkhdf () {
-  if ((  1 != $(tr -dc ':'  <<< "$1" | wc -c)  )) ; then
-    echo "Input ($1) must be of form 'hdfFile:hdfContainer'." >&2
+  if ((  1 != $(tr -dc '@'  <<< "$1" | wc -c)  )) ; then
+    echo "Input ($1) must be of form 'hdfFile@hdfContainer'." >&2
     exit 1
   fi
 }
